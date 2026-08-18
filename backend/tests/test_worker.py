@@ -69,6 +69,9 @@ def worker_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Settings
     monkeypatch.setenv("FACEID_SCRFD_MODEL_PATH", str(SCRFD_WEIGHTS))
     monkeypatch.setenv("FACEID_ADAFACE_MODEL_PATH", str(ADAFACE_WEIGHTS))
     monkeypatch.setenv("FACEID_OBJECT_STORE_ROOT", str(tmp_path / "objects"))
+    monkeypatch.setenv("FACEID_DECISION_ACCEPT_THRESHOLD", "0.62")
+    monkeypatch.setenv("FACEID_DECISION_REVIEW_THRESHOLD", "0.42")
+    monkeypatch.setenv("FACEID_DECISION_POLICY_VERSION", "worker-test-v1")
     return Settings()  # type: ignore[call-arg]
 
 

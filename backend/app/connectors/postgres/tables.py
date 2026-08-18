@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -21,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 
 metadata = MetaData()
@@ -116,4 +118,61 @@ face_embeddings = Table(
         "Metadata for embeddings held in the vector store. The vectors "
         "themselves live in Qdrant; this table records what produced them."
     ),
+)
+
+
+identifications = Table(
+    "identifications",
+    metadata,
+    Column("identification_uuid", PgUUID(as_uuid=True), primary_key=True),
+    Column("query_sha256", String(64), nullable=False),
+    Column("outcome", String(16), nullable=False),
+    Column("policy_version", String(128), nullable=False),
+    Column("accept_at", Float, nullable=False),
+    Column("review_at", Float, nullable=False),
+    Column(
+        "best_person_uuid",
+        PgUUID(as_uuid=True),
+        ForeignKey("persons.person_uuid", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    Column("best_score", Float, nullable=True),
+    Column("candidates", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("review_outcome", String(16), nullable=True),
+    Column("reviewed_by", String(256), nullable=True),
+    Column("reviewed_at", DateTime(timezone=True), nullable=True),
+    Column("review_note", Text(), nullable=True),
+    CheckConstraint("outcome IN ('accept', 'review', 'reject')", name="ck_identification_outcome"),
+    CheckConstraint(
+        "review_outcome IS NULL OR review_outcome IN ('confirmed', 'rejected')",
+        name="ck_identification_review_outcome",
+    ),
+    # The thresholds in force are stored with the decision, not just referenced.
+    # A past decision must stay readable against the rules that produced it,
+    # even after the policy changes.
+    Index("ix_identifications_outcome", "outcome"),
+    comment="Identification attempts, with the decision and the policy that produced it.",
+)
+
+audit_events = Table(
+    "audit_events",
+    metadata,
+    Column("audit_uuid", PgUUID(as_uuid=True), primary_key=True),
+    Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("action", String(64), nullable=False),
+    Column("actor_identifier", String(256), nullable=False),
+    Column("actor_kind", String(16), nullable=False),
+    Column("person_uuid", PgUUID(as_uuid=True), nullable=True),
+    Column("face_sample_uuid", PgUUID(as_uuid=True), nullable=True),
+    Column("identification_uuid", PgUUID(as_uuid=True), nullable=True),
+    Column("policy_version", String(128), nullable=True),
+    Column("details", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    CheckConstraint("actor_kind IN ('user', 'system')", name="ck_audit_actor_kind"),
+    Index("ix_audit_events_person", "person_uuid"),
+    Index("ix_audit_events_identification", "identification_uuid"),
+    Index("ix_audit_events_occurred_at", "occurred_at"),
+    # Deliberately carries no foreign keys: an audit record must survive the
+    # deletion of what it describes, or it cannot evidence that deletion.
+    comment="Append-only record of administrative and review actions.",
 )

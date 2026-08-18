@@ -96,7 +96,8 @@ def _to_response(person_uuid: UUID, sample: object, created: bool) -> EnrolmentR
     )
 
 
-async def _read_image(upload: UploadFile) -> bytes:
+async def read_image_upload(upload: UploadFile) -> bytes:
+    """Validate an uploaded image and return its bytes."""
     if upload.content_type not in ALLOWED_CONTENT_TYPES:
         raise InvalidEnrolmentError(
             f"unsupported image type {upload.content_type!r}; "
@@ -139,7 +140,7 @@ async def create_enrolment(
     Idempotent: resubmitting the same image under the same identifiers returns
     the original identifiers and schedules no further work.
     """
-    data = await _read_image(image)
+    data = await read_image_upload(image)
     try:
         enrolment = EnrolmentRequest(
             source=source,

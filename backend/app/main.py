@@ -8,8 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.adapters.factory import build_detector, build_recognizer
 from app.api.v1.enrolments import router as enrolment_router
 from app.api.v1.health import router as health_router
+from app.api.v1.identifications import router as identification_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
@@ -55,6 +57,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.objects = objects
     register_probe(objects.provider, objects.ping)
 
+    # Identification answers in the request path, so its models live here.
+    # Enrolment still hands its work to the worker; only identification pays
+    # this cost, and only when weights are configured.
+    app.state.detector = None
+    app.state.recognizer = None
+    if settings.scrfd_model_path and settings.adaface_model_path:
+        detector, recognizer = build_detector(settings), build_recognizer(settings)
+        detector.warmup()
+        recognizer.warmup()
+        app.state.detector = detector
+        app.state.recognizer = recognizer
+        logger.info(
+            "identification models loaded",
+            extra={
+                "detector": detector.model_name,
+                "recognizer": recognizer.model_name,
+                "model_version": recognizer.model_version,
+            },
+        )
+    else:
+        logger.warning("identification models are not configured; identification will fail")
+
     try:
         yield
     finally:
@@ -85,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(enrolment_router, prefix=settings.api_v1_prefix)
+    app.include_router(identification_router, prefix=settings.api_v1_prefix)
     return app
 
 

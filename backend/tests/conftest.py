@@ -23,6 +23,9 @@ TEST_ENV = {
     "FACEID_POSTGRES_DSN": "postgresql://faceid:unused@localhost:5432/faceid",
     "FACEID_REDIS_DSN": "redis://localhost:6379/0",
     "FACEID_QDRANT_URL": "http://qdrant:6333",
+    "FACEID_DECISION_ACCEPT_THRESHOLD": "0.62",
+    "FACEID_DECISION_REVIEW_THRESHOLD": "0.42",
+    "FACEID_DECISION_POLICY_VERSION": "test-policy-v1",
 }
 
 

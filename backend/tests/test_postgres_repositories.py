@@ -284,6 +284,9 @@ def test_readyz_reports_postgres_when_the_app_starts(
     monkeypatch.setenv("FACEID_REDIS_DSN", "redis://localhost:6379/0")
     monkeypatch.setenv("FACEID_QDRANT_URL", "http://qdrant:6333")
     monkeypatch.setenv("FACEID_OBJECT_STORE_ROOT", str(tmp_path / "objects"))
+    monkeypatch.setenv("FACEID_DECISION_ACCEPT_THRESHOLD", "0.62")
+    monkeypatch.setenv("FACEID_DECISION_REVIEW_THRESHOLD", "0.42")
+    monkeypatch.setenv("FACEID_DECISION_POLICY_VERSION", "readiness-test-v1")
 
     clear_probes()
     try:

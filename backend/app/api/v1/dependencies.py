@@ -17,9 +17,14 @@ from app.connectors.postgres import (
     SqlAlchemyFaceSampleRepository,
     SqlAlchemyPersonRepository,
 )
+from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
+from app.connectors.qdrant import QdrantVectorRepository
 from app.connectors.redis import RedisJobQueue
+from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
+from app.domain.identity import DecisionThresholds
 from app.services.enrolment import EnrolmentService, SampleReader
+from app.services.identification import IdentificationService
 
 
 def _postgres(request: Request) -> PostgresConnector:
@@ -42,6 +47,47 @@ async def get_enrolment_service(request: Request) -> AsyncIterator[EnrolmentServ
             samples=SqlAlchemyFaceSampleRepository(session),
             objects=objects,
             queue=queue,
+        )
+
+
+def _thresholds(request: Request) -> DecisionThresholds:
+    settings: Settings = request.app.state.settings
+    return DecisionThresholds(
+        accept_at=settings.decision_accept_threshold,
+        review_at=settings.decision_review_threshold,
+        policy_version=settings.decision_policy_version,
+    )
+
+
+async def get_identification_store(
+    request: Request,
+) -> AsyncIterator[SqlAlchemyIdentificationStore]:
+    """Build an identification store bound to one database transaction."""
+    async with _postgres(request).session() as session:
+        yield SqlAlchemyIdentificationStore(session)
+
+
+async def get_identification_service(
+    request: Request,
+) -> AsyncIterator[IdentificationService]:
+    """Build an identification service bound to one database transaction.
+
+    The models are held on application state and loaded once, not per request.
+    """
+    qdrant = getattr(request.app.state, "qdrant", None)
+    if qdrant is None:
+        raise ServiceUnavailableError("the vector store is not available")
+
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        yield IdentificationService(
+            vectors=QdrantVectorRepository(qdrant),
+            store=SqlAlchemyIdentificationStore(session),
+            audit=SqlAlchemyAuditLog(session),
+            thresholds=_thresholds(request),
+            candidate_limit=settings.decision_candidate_limit,
+            detector=getattr(request.app.state, "detector", None),
+            recognizer=getattr(request.app.state, "recognizer", None),
         )
 
 

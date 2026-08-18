@@ -44,6 +44,23 @@ class Settings(BaseSettings):
         description="Directory the filesystem object store writes beneath.",
     )
 
+    # Identity decision policy. Deliberately has NO defaults: a matching
+    # threshold that ships as a constant is a hard-coded production threshold,
+    # and every deployment must state its own and be able to explain it.
+    decision_accept_threshold: float = Field(
+        ge=-1.0, le=1.0, description="At or above this similarity, propose a match."
+    )
+    decision_review_threshold: float = Field(
+        ge=-1.0, le=1.0, description="At or above this similarity, ask a human."
+    )
+    decision_policy_version: str = Field(
+        min_length=1,
+        description="Name of the threshold policy, recorded with every decision.",
+    )
+    decision_candidate_limit: int = Field(
+        default=10, ge=1, le=100, description="Neighbours fetched per identification."
+    )
+
     # Face detection. Weights are supplied per environment as a mounted file
     # and verified against a checksum; they are never committed or baked in.
     scrfd_model_path: Path | None = Field(

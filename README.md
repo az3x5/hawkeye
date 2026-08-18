@@ -3,9 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 5 (idempotent enrolment + Redis jobs) complete.** Faces can be
-enrolled over HTTP and are embedded by a worker; identity matching and review
-do not exist yet — see
+**Status: Phase 6 (identity decisions, thresholds, audit) complete.** Faces can
+be enrolled, identified and reviewed over HTTP, with every decision audited.
+The review frontend does not exist yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -173,6 +173,9 @@ No credential is defaulted in code and `.env` is git-ignored.
 | GET | `/api/v1/readyz` | Runs every registered dependency probe; 503 if any fails. |
 | POST | `/api/v1/enrolments` | Enrol a face sample. Idempotent; 202 on both first and repeat submissions. |
 | GET | `/api/v1/face-samples/{uuid}` | Read a sample's processing state. |
+| POST | `/api/v1/identifications` | Propose who a face belongs to. Audited. |
+| GET | `/api/v1/identifications/{uuid}` | Read a past decision and its policy. |
+| POST | `/api/v1/identifications/{uuid}/review` | Record a human's conclusion. Audited. |
 
 Enrol a face:
 
@@ -187,8 +190,39 @@ Embedding happens in the `worker` service; poll the face-sample endpoint until
 
 Interactive docs are served at `/docs` in the `local` environment only.
 
-Identity matching is not yet reachable over HTTP: samples are enrolled and
-embedded, but nothing yet compares them or decides who someone is.
+## Identity decisions
+
+Thresholds have **no defaults in code** — the service refuses to start without
+them, because a default would be a hard-coded matching threshold that silently
+becomes production:
+
+| Setting | Meaning |
+| --- | --- |
+| `FACEID_DECISION_ACCEPT_THRESHOLD` | At or above this similarity, propose a match |
+| `FACEID_DECISION_REVIEW_THRESHOLD` | At or above this, ask a human |
+| `FACEID_DECISION_POLICY_VERSION` | Recorded with every decision |
+| `FACEID_DECISION_CANDIDATE_LIMIT` | Neighbours fetched per identification (default 10) |
+
+The values in `.env.example` are illustrative starting points, **not validated
+operating values** — tune them against your own population first.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications -F image=@face.jpg
+```
+
+The response carries `outcome` (`accept` / `review` / `reject`), the candidates
+with raw cosine `score`s, the `margin` to the runner-up, and the thresholds
+that produced it. Scores are uncalibrated similarities — **not probabilities**,
+and `accept` is a proposal to act, not a determination of identity.
+
+Only proposals with outcome `review` can be reviewed, and only once:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications/$ID/review -H 'Content-Type: application/json' -d '{"outcome":"confirmed","reviewer":"alice@example.com","note":"same person"}'
+```
+
+Every identification and review is written to an append-only audit log with the
+actor, the policy in force, and the scores involved.
 
 ## Data model
 
@@ -198,3 +232,5 @@ embedded, but nothing yet compares them or decides who someone is.
 | `person_external_identifiers` | upstream `id` / `local_id`, unique per `(source, kind, value)` |
 | `face_samples` | many captures per person, deduplicated per person by content hash, with processing state |
 | `face_embeddings` | what was embedded, under which model provenance, into which collection |
+| `identifications` | each attempt, its decision, and the thresholds in force at the time |
+| `audit_events` | append-only record of decisions and reviews; no foreign keys, so it outlives what it describes |

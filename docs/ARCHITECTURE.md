@@ -130,8 +130,8 @@ These are separated deliberately, and stay separate.
 
 - **Recognition** produces *similarity scores* between face samples. It is
   a measurement: deterministic given a model version and an input.
-- **Identity decision** turns scores into *actions* — accept, reject, route to
-  human review, merge, split. It owns thresholds, policy and audit.
+- **Identity decision** turns scores into *actions*. `app/domain/identity.py`
+  is pure: no storage, no model, no HTTP. It owns thresholds and policy.
 
 Consequences that are enforced, not merely suggested:
 
@@ -139,10 +139,36 @@ Consequences that are enforced, not merely suggested:
 - A cosine similarity is **not** converted into a probability. Doing so implies
   a calibrated model and a known prior population, and we have neither. Scores
   are reported as scores.
-- **Thresholds are never hard-coded.** They are configuration, versioned and
-  auditable, because they are a policy choice that differs per deployment,
-  per population and per risk appetite — and because a threshold baked into
-  code cannot be reviewed, tuned or explained after a contested decision.
+- **Thresholds are never hard-coded.** They have *no defaults in code at all*:
+  `FACEID_DECISION_ACCEPT_THRESHOLD`, `FACEID_DECISION_REVIEW_THRESHOLD` and
+  `FACEID_DECISION_POLICY_VERSION` are required settings and the service
+  refuses to start without them. A default would be a hard-coded matching
+  threshold that silently becomes production. Because a threshold cannot be
+  reviewed or explained after a contested decision unless it was recorded, the
+  values in force are stored *with every decision*, not merely referenced — a
+  past decision stays readable against the rules that actually produced it,
+  even after the policy changes.
+
+### The three bands
+
+At or above `accept_at` the system proposes a match; at or above `review_at`
+it asks a human; below that it proposes nobody. Bands are closed at the
+bottom, so a score exactly on a threshold falls on the cautious side of the
+boundary being crossed. `accept_at` must exceed `review_at` — equal values
+would leave no band in which a human is asked to look, and the domain refuses
+to construct such a policy.
+
+### Aggregating a person's many samples
+
+A neighbour list contains samples, not people, and one person may occupy
+several rows. Candidates are collapsed per person and scored by their
+**best-matching sample**. Averaging would punish exactly the sample diversity
+the system is designed to collect: a person with one unhelpful angle on file
+should not be penalised for having it. `sample_count` is reported alongside, so
+a reviewer can tell a single lucky match from a consistent one, and `margin` —
+the gap to the runner-up — is surfaced rather than buried. Acting on a narrow
+margin is the reviewer's call; the system does not silently change its
+proposal because of it.
 
 ## 4. Storage
 
@@ -275,11 +301,32 @@ An image containing more than one face is **refused, not guessed**. Which face
 belongs to the enrolling person is an identity question, and the worker has no
 business answering it.
 
-## 6. Auditability (planned)
+## 6. Auditability
 
-Every administrative and review action — threshold change, merge, split,
-manual accept/reject, deletion — is written to an append-only audit record
-capturing actor, action, subject `person_uuid`, before/after state and time.
+Every identification and every review writes an append-only record capturing
+actor, action, subject, the policy in force and structured context.
+
+`audit_events` deliberately carries **no foreign keys**: an audit record must
+survive the deletion of what it describes, or it cannot evidence that deletion.
+`SqlAlchemyAuditLog` exposes `record`, `for_person` and `for_identification` —
+there is no update and no delete, because a log that can be rewritten is not
+evidence. A test asserts that public surface exactly.
+
+Actors are typed. An automatic proposal is attributed to `SYSTEM_ACTOR`
+(`kind="system"`), never to a person, so reading the log back can never blur
+what a machine proposed with what a human judged. A review must be attributed
+to a `user`; the service refuses a system-attributed review.
+
+Reviews are single-shot. `record_review` updates only rows whose review is
+still null, so a second review conflicts rather than overwriting the first —
+changing a recorded judgement would erase it.
+
+### Which decisions may be reviewed
+
+Only proposals whose outcome was `review`. Rubber-stamping an automatic
+`accept`, or overturning a `reject` nobody was asked about, would make the
+trail misleading about what a human actually considered, so both are refused
+with 409.
 
 ## 7. Observability and privacy
 

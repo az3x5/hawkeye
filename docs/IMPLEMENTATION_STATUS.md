@@ -349,8 +349,71 @@ someone is.
     regression tests cover both halves.
 - Integration tests must use a separate Redis database (15) from the running
   worker, which otherwise consumes the tests' jobs off database 0.
-## Phase 6 — Identity decision layer, configurable thresholds, audit log — ⬜ NOT STARTED
+## Phase 6 — Identity decision layer, configurable thresholds, audit log — ✅ COMPLETE
+
+The layer that turns similarity into action, the policy that governs it, and
+the record that makes both accountable.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Pure decision logic: thresholds, aggregation, bands, margin | `backend/app/domain/identity.py` |
+| Audit types, typed actors, append-only `AuditLog` protocol | `backend/app/domain/audit.py` |
+| Append-only log and identification store | `backend/app/connectors/postgres/audit.py` |
+| Identification and review orchestration | `backend/app/services/identification.py` |
+| `POST /identifications`, `GET /identifications/{uuid}`, `POST .../review` | `backend/app/api/v1/identifications.py` |
+| Required threshold settings | `backend/app/core/config.py` |
+| `identifications`, `audit_events` + revision `35141621313d` | `backend/app/connectors/postgres/tables.py`, `backend/migrations/` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Thresholds have no default in code | settings are required fields; every test and service must state a policy | ✅ startup fails without them |
+| The same evidence decides differently under another policy | unit test, and live by restarting under a stricter policy | ✅ 0.9804 → `accept` at 0.62, `review` at 0.99 |
+| Bands are closed at the bottom | boundary tests at and just below each threshold | ✅ |
+| `accept_at` must exceed `review_at` | construction test | ✅ refuses "no band" policies |
+| A person is scored by their best sample | aggregation tests | ✅ a weak sample does not drag them down |
+| Candidate ordering is deterministic under ties | repeated runs | ✅ |
+| Scores are not probabilities | negative score representable; no normalisation; schema says so | ✅ |
+| Margin is surfaced, not acted on | narrow-margin test | ✅ outcome unchanged |
+| Every identification is audited | live `audit_events` inspection | ✅ `identification_performed`, actor `system` |
+| Every review is audited | live inspection | ✅ `identification_reviewed`, actor `user` |
+| Automatic proposals are never attributed to a person | actor kind asserted | ✅ |
+| Only `review` outcomes can be reviewed | unit, API and live | ✅ 409 `review_not_permitted` |
+| A review cannot be overwritten | store and API tests, live | ✅ 409 on second review |
+| The log exposes no update or delete | public surface asserted | ✅ `{record, for_person, for_identification}` |
+| Audit records outlive what they describe | person deleted, event remains | ✅ no foreign keys |
+| Thresholds are stored with the decision | column inspection | ✅ readable after policy change |
+| Every endpoint has schemas, validation, structured errors | OpenAPI and error-envelope tests | ✅ 201/404/409/422 |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 336 passed; 259 passed + 76 skipped without dependencies |
+
+### Deliberately NOT in Phase 6
+
+No merge or split of people, no bulk review queue endpoint, no frontend. The
+decision layer proposes; acting on an `accept` beyond recording it is left to
+the caller.
+
+### Notes
+
+- **A bug found only by running it.** The review endpoint recorded and audited
+  the review correctly but answered with nulls: it read the record back through
+  a *second* database session that could not see the first one's uncommitted
+  write. The service now returns the updated record directly, and a regression
+  test covers it. Unit tests with fakes had passed, because fakes share no
+  transaction semantics with a database.
+- Introducing `IdentificationStore` as a domain protocol replaced several
+  `object` annotations that had been hiding exactly this class of error from
+  the type checker.
+- Identification loads the models in the API process, unlike enrolment: the
+  caller is waiting for an answer, so the work cannot be handed to the worker.
 ## Phase 7 — Next.js + TypeScript review frontend — ⬜ NOT STARTED
+
+Planned: a review queue over the existing endpoints — list identifications
+awaiting review, show the query image beside each candidate's samples with
+scores and margin, and record confirm/reject with the reviewer's identity. No
+new decision logic: the frontend presents what the API already decides.
 
 ## Known issues
 
