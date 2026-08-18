@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -266,7 +267,9 @@ async def test_deleting_a_person_removes_their_samples(
     assert list(samples) == []
 
 
-def test_readyz_reports_postgres_when_the_app_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readyz_reports_postgres_when_the_app_starts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The full application registers its storage connectors as readiness probes."""
     from fastapi.testclient import TestClient
 
@@ -280,6 +283,7 @@ def test_readyz_reports_postgres_when_the_app_starts(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("FACEID_POSTGRES_DSN", INTEGRATION_DSN)
     monkeypatch.setenv("FACEID_REDIS_DSN", "redis://localhost:6379/0")
     monkeypatch.setenv("FACEID_QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv("FACEID_OBJECT_STORE_ROOT", str(tmp_path / "objects"))
 
     clear_probes()
     try:

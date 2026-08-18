@@ -275,13 +275,80 @@ Planned: the Qdrant `StorageConnector`, collections keyed by `person_uuid` plus
 sample id, embedding-provenance rows in PostgreSQL, and a guarantee that
 vectors from different provenance triples never share an index. Qdrant stays
 unpublished.
-## Phase 5 — Idempotent enrolment + Redis jobs — ⬜ NOT STARTED
+## Phase 5 — Idempotent enrolment + Redis jobs — ✅ COMPLETE
 
-Planned: the first externally visible endpoints. Enrolment keyed on
-(source, external identifier) plus image content hash so retries converge on
-the same `person_uuid` and the same sample, detection and recognition driven
-from a Redis-backed worker rather than the request path, and request/response
-schemas with validation, structured errors and tests for every endpoint.
+The first externally visible surface. Enrolment records a face sample and
+schedules embedding; a worker runs the models and stores the vector.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| `EmbeddingJob`, `ProcessingState`, `JobQueue` and `ObjectStore` protocols | `backend/app/domain/jobs.py` |
+| Content-addressed image storage | `backend/app/connectors/filesystem/` |
+| Redis connector and reliable-queue implementation | `backend/app/connectors/redis/` |
+| Idempotent enrolment, `SampleReader` | `backend/app/services/enrolment.py` |
+| `POST /enrolments`, `GET /face-samples/{uuid}` | `backend/app/api/v1/enrolments.py` |
+| Request-scoped dependency wiring | `backend/app/api/v1/dependencies.py` |
+| Embedding worker process | `backend/app/worker.py` |
+| Processing state + revision `dcece6ee12f6` | `backend/app/connectors/postgres/tables.py`, `backend/migrations/` |
+| `worker` service, shared object volume | `docker-compose.yml` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| The same submission twice converges | service and API tests | ✅ same person and sample uuid, `created: false` |
+| A repeat schedules no further work | queue depth asserted | ✅ exactly one job |
+| Repeating many times stays stable | 5 repeats | ✅ same sample throughout |
+| A second image adds a sample to the same person | service test | ✅ two samples, one person |
+| A concurrent duplicate converges rather than failing | insert race simulated | ✅ no second row, no second job |
+| Identifiers are scoped by source | same value, two sources | ✅ two people |
+| Identifiers denoting two people are refused | service and API tests | ✅ 409 `conflicting_identifiers` |
+| At least one identifier is required | service and API tests | ✅ 422 `invalid_enrolment` |
+| Uploads are validated | type, empty, oversized, missing | ✅ structured 422 with `field` |
+| Every endpoint has schemas and errors | OpenAPI assertions | ✅ 202/404/409/422 documented |
+| No image bytes in responses or job payloads | explicit assertions | ✅ identifiers and hash only |
+| A real face is embedded end to end | worker against real Postgres, Redis, Qdrant and both models | ✅ `processed`, 512-d vector stored |
+| The stored vector is findable | search by the stored embedding | ✅ own sample at ≈1.0 |
+| A faceless image fails cleanly | blank frame | ✅ `failed`, "no face was detected", no vector |
+| A missing object fails the job | object deleted before processing | ✅ `failed`, reason recorded |
+| An undecodable image fails the job | corrupt bytes | ✅ `failed`, reason recorded |
+| Multiple faces are refused, not guessed | two faces in one image | ✅ `failed`, "requires exactly one" |
+| Replaying a job does not duplicate the vector | same job processed twice | ✅ one point |
+| A reserved job is held until reported | in-flight list inspected | ✅ survives a dead worker |
+| Failed jobs are kept with their reason | failure list inspected | ✅ reason retained |
+| A corrupt queue entry is reported | malformed JSON pushed | ✅ `JobQueueError`, not skipped |
+| Worker takes no inbound port | `docker compose config` | ✅ `ports: none` |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 265 passed |
+
+### Deliberately NOT in Phase 5
+
+No identity matching, no thresholds, no review or merge, no audit log, no
+frontend. Search exists in the vector layer but nothing calls it to decide who
+someone is.
+
+### Notes
+
+- `python-multipart` and `redis` were missing from `pyproject.toml` and were
+  added once the tests and the container caught it.
+- Enrolment deliberately answers 202 for repeats rather than 409: callers
+  retrying after a timeout need convergence, not an error.
+- Images live in a filesystem object store behind the `ObjectStore` interface.
+  Swapping it for S3 or GCS is a connector change and nothing else.
+- Two bugs the container caught that the host tests did not:
+  - The object volume was root-owned while the process runs as uid 10001. The
+    readiness probe reported it correctly; the image now creates
+    `/srv/objects` owned by the runtime user so Docker seeds the volume with
+    that ownership.
+  - `reserve()` raced redis-py's read deadline. redis-py derives a blocking
+    command's deadline from the command's own timeout, so a 5s block on an
+    empty queue raised instead of returning "no job". The host tests used a 1s
+    block and passed by luck. The connector now sets a socket timeout with
+    headroom, `reserve()` refuses a block that would exceed it, and two
+    regression tests cover both halves.
+- Integration tests must use a separate Redis database (15) from the running
+  worker, which otherwise consumes the tests' jobs off database 0.
 ## Phase 6 — Identity decision layer, configurable thresholds, audit log — ⬜ NOT STARTED
 ## Phase 7 — Next.js + TypeScript review frontend — ⬜ NOT STARTED
 

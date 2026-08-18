@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID, uuid4
 
+from app.domain.jobs import ProcessingState
+
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -100,6 +102,9 @@ class FaceSample:
     face_sample_uuid: UUID = field(default_factory=uuid4)
     captured_at: datetime | None = None
     created_at: datetime = field(default_factory=_utcnow)
+    processing_state: ProcessingState = ProcessingState.PENDING
+    processed_at: datetime | None = None
+    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         """Normalise the content hash and validate the sample's attributes."""

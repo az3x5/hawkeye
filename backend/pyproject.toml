@@ -19,6 +19,8 @@ dependencies = [
     "torch>=2.4",
     "safetensors>=0.4",
     "qdrant-client>=1.12",
+    "redis>=5.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +49,7 @@ ignore = ["D203", "D213", "ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
 # Test names are the documentation; classes only group them.
-"tests/*" = ["S101", "D101", "D102", "D103", "ANN001"]
+"tests/*" = ["S101", "D101", "D102", "D103", "D107", "ANN001", "SLF001"]
 # Alembic owns the shape of generated revisions: its template's imports,
 # typing style and long generated literals are not ours to restyle.
 "migrations/versions/*" = ["D", "ANN", "UP", "I", "E501"]

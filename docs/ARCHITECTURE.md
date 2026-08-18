@@ -223,12 +223,57 @@ removes their biometric material rather than orphaning it.
 with SQLAlchemy Core. Domain entities are plain frozen dataclasses with no ORM
 base class, so the domain layer has no dependency on how it is stored.
 
-## 5. Enrolment is idempotent (planned)
+## 5. Enrolment is idempotent
 
-Re-submitting the same enrolment must not create a second person or a
-duplicate sample. Idempotency is keyed on the (source, external identifier)
-pair plus a content hash of the image, so a retried or replayed request
-converges on the same `person_uuid` and the same sample.
+Re-submitting the same enrolment does not create a second person or a
+duplicate sample. Idempotency is keyed on the source-scoped external
+identifier plus the SHA-256 of the image, so a retried or replayed request
+converges on the same `person_uuid` and the same `face_sample_uuid` — and
+schedules the embedding work exactly once.
+
+A repeat is **not an error**: `POST /api/v1/enrolments` answers 202 either way,
+with `created: false` and `status: "already_enrolled"` distinguishing the two.
+Callers retrying after a timeout need convergence, not a 409.
+
+Losing an insert race to a concurrent identical enrolment also converges: the
+service catches the conflict, re-reads the row that won, and returns it. The
+loser leaves no second row and enqueues no second job.
+
+A request naming identifiers that already denote *two different people* is
+refused with 409. Merging two people is a review decision with an audit trail,
+not something an enrolment should do implicitly.
+
+### Enrolment does not run models
+
+Enrolment is bookkeeping: it stores the image, records the sample, and
+enqueues. Detection and recognition happen in a worker. Two reasons — a slow or
+failing model must not fail the caller's write, and the models are far too
+heavy to load into every web process.
+
+```
+POST /enrolments ──▶ object store (image, by content hash)
+                 ──▶ postgres (person, sample: pending)
+                 ──▶ redis queue (identifiers only, never pixels)
+                                    │
+                          worker ◀──┘
+                            ├─ detect + align (SCRFD)
+                            ├─ embed (AdaFace)
+                            ├─ qdrant (vector)
+                            └─ postgres (sample: processed | failed)
+```
+
+The queue payload carries `face_sample_uuid`, `person_uuid`, `image_sha256` and
+a timestamp — never image bytes and never a vector. The worker fetches the
+image from the object store itself.
+
+Jobs are reserved rather than popped: `BLMOVE` moves a job to an in-flight list
+and it is deleted only once the outcome is reported, so a worker that dies
+mid-job leaves the job visible instead of losing it. Failed jobs are kept with
+their reason — a job that could not be processed is evidence, not noise.
+
+An image containing more than one face is **refused, not guessed**. Which face
+belongs to the enrolling person is an identity question, and the worker has no
+business answering it.
 
 ## 6. Auditability (planned)
 

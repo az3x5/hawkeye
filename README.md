@@ -3,8 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 4 (Qdrant vector storage) complete.** Detection, recognition
-and vector storage run; enrolment and identity decisions do not exist yet — see
+**Status: Phase 5 (idempotent enrolment + Redis jobs) complete.** Faces can be
+enrolled over HTTP and are embedded by a worker; identity matching and review
+do not exist yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -90,8 +91,12 @@ Detection tests are skipped unless the weights are present, and database tests
 unless a real database is named, so neither can pass silently against nothing:
 
 ```bash
-FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid PYTHONPATH=. ../.venv/bin/pytest -q
+FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid FACEID_TEST_QDRANT_URL=http://127.0.0.1:6333 FACEID_TEST_REDIS_DSN=redis://127.0.0.1:6379/15 PYTHONPATH=. ../.venv/bin/pytest -q
 ```
+
+Note the Redis database index: the tests and the running `worker` service share
+one Redis instance, and the worker will happily consume a test's job off the
+default database. Database 15 keeps them apart.
 
 ## Face detection
 
@@ -166,11 +171,24 @@ No credential is defaulted in code and `.env` is git-ignored.
 | --- | --- | --- |
 | GET | `/api/v1/health` | Liveness. Performs no I/O. |
 | GET | `/api/v1/readyz` | Runs every registered dependency probe; 503 if any fails. |
+| POST | `/api/v1/enrolments` | Enrol a face sample. Idempotent; 202 on both first and repeat submissions. |
+| GET | `/api/v1/face-samples/{uuid}` | Read a sample's processing state. |
+
+Enrol a face:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/enrolments -F source=crm -F external_id=42 -F image=@face.jpg
+```
+
+The response carries `person_uuid`, the sample, and `created` — `false` means
+the submission repeated an earlier one and scheduled no further work.
+Embedding happens in the `worker` service; poll the face-sample endpoint until
+`processing_state` leaves `pending`.
 
 Interactive docs are served at `/docs` in the `local` environment only.
 
-Persistence is not yet reachable over HTTP — the domain and its repositories
-exist, but no enrolment or lookup endpoint has been built.
+Identity matching is not yet reachable over HTTP: samples are enrolled and
+embedded, but nothing yet compares them or decides who someone is.
 
 ## Data model
 
@@ -178,4 +196,5 @@ exist, but no enrolment or lookup endpoint has been built.
 | --- | --- |
 | `persons` | `person_uuid`, the sole internal key |
 | `person_external_identifiers` | upstream `id` / `local_id`, unique per `(source, kind, value)` |
-| `face_samples` | many captures per person, deduplicated per person by content hash |
+| `face_samples` | many captures per person, deduplicated per person by content hash, with processing state |
+| `face_embeddings` | what was embedded, under which model provenance, into which collection |

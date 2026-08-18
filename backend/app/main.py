@@ -8,9 +8,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.v1.enrolments import router as enrolment_router
 from app.api.v1.health import router as health_router
+from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
+from app.connectors.redis import RedisConnector, RedisJobQueue
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -43,9 +46,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.qdrant = qdrant
     register_probe(qdrant.provider, qdrant.ping)
 
+    redis = RedisConnector(str(settings.redis_dsn))
+    app.state.redis = redis
+    app.state.queue = RedisJobQueue(redis)
+    register_probe(redis.provider, redis.ping)
+
+    objects = FilesystemObjectStore(settings.object_store_root)
+    app.state.objects = objects
+    register_probe(objects.provider, objects.ping)
+
     try:
         yield
     finally:
+        await redis.close()
         await qdrant.close()
         await postgres.close()
         clear_probes()
@@ -71,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     install_error_handlers(app)
     app.include_router(health_router, prefix=settings.api_v1_prefix)
+    app.include_router(enrolment_router, prefix=settings.api_v1_prefix)
     return app
 
 

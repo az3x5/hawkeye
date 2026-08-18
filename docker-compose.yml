@@ -12,17 +12,45 @@ services:
       FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_OBJECT_STORE_ROOT: /srv/objects
       FACEID_SCRFD_MODEL_PATH: /srv/models/scrfd_10g_bnkps.onnx
       FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
       FACEID_ADAFACE_MODEL_PATH: /srv/models/adaface_ir101_webface12m.safetensors
       FACEID_ADAFACE_MODEL_SHA256: ${FACEID_ADAFACE_MODEL_SHA256:-}
     ports: ["127.0.0.1:8000:8000"]
     # Weights are mounted read-only, never baked into the image or committed.
-    volumes: ["./models:/srv/models:ro"]
+    # Source images are shared with the worker, which reads what the API wrote.
+    volumes:
+      - "./models:/srv/models:ro"
+      - "object-data:/srv/objects"
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       qdrant: {condition: service_started}
+    networks: [faceid]
+
+  worker:
+    build: ./backend
+    image: faceid-api:dev
+    command: ["python", "-m", "app.worker"]
+    env_file: [.env]
+    environment:
+      FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FACEID_REDIS_DSN: redis://redis:6379/0
+      FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_OBJECT_STORE_ROOT: /srv/objects
+      FACEID_SCRFD_MODEL_PATH: /srv/models/scrfd_10g_bnkps.onnx
+      FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
+      FACEID_ADAFACE_MODEL_PATH: /srv/models/adaface_ir101_webface12m.safetensors
+      FACEID_ADAFACE_MODEL_SHA256: ${FACEID_ADAFACE_MODEL_SHA256:-}
+    # No published port: the worker takes work from Redis, not from callers.
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      qdrant: {condition: service_started}
+    volumes:
+      - "./models:/srv/models:ro"
+      - "object-data:/srv/objects"
     networks: [faceid]
 
   postgres:
@@ -63,6 +91,7 @@ networks:
     driver: bridge
 
 volumes:
+  object-data:
   postgres-data:
   redis-data:
   qdrant-data:

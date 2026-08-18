@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(min_length=1)
     qdrant_api_key: str | None = None
 
+    # Source images. Held by the object store so the worker can read what the
+    # API wrote; a deployment swaps the connector for S3 or GCS.
+    object_store_root: Path = Field(
+        default=Path("/srv/objects"),
+        description="Directory the filesystem object store writes beneath.",
+    )
+
     # Face detection. Weights are supplied per environment as a mounted file
     # and verified against a checksum; they are never committed or baked in.
     scrfd_model_path: Path | None = Field(

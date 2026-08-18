@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import Row, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.postgres.tables import face_samples, person_external_identifiers, persons
+from app.domain.jobs import ProcessingState
 from app.domain.models import ExternalIdentifier, ExternalIdentifierKind, FaceSample, Person
 from app.domain.repositories import ConflictError
 
@@ -30,6 +34,9 @@ def _to_face_sample(row: Row[tuple[object, ...]]) -> FaceSample:
         source=row.source,
         captured_at=row.captured_at,
         created_at=row.created_at,
+        processing_state=ProcessingState(row.processing_state),
+        processed_at=row.processed_at,
+        failure_reason=row.failure_reason,
     )
 
 
@@ -137,6 +144,9 @@ class SqlAlchemyFaceSampleRepository:
                     source=sample.source,
                     captured_at=sample.captured_at,
                     created_at=sample.created_at,
+                    processing_state=sample.processing_state.value,
+                    processed_at=sample.processed_at,
+                    failure_reason=sample.failure_reason,
                 )
             )
         except IntegrityError as exc:
@@ -162,6 +172,31 @@ class SqlAlchemyFaceSampleRepository:
             .order_by(face_samples.c.created_at, face_samples.c.face_sample_uuid)
         )
         return [_to_face_sample(row) for row in result.all()]
+
+    async def mark_processed(self, face_sample_uuid: UUID) -> None:
+        """Record that a sample has been embedded successfully."""
+        await self._set_state(face_sample_uuid, ProcessingState.PROCESSED, None)
+
+    async def mark_failed(self, face_sample_uuid: UUID, reason: str) -> None:
+        """Record that a sample could not be embedded, and why."""
+        await self._set_state(face_sample_uuid, ProcessingState.FAILED, reason)
+
+    async def _set_state(
+        self, face_sample_uuid: UUID, state: ProcessingState, reason: str | None
+    ) -> None:
+        result = await self._session.execute(
+            face_samples.update()
+            .where(face_samples.c.face_sample_uuid == face_sample_uuid)
+            .values(
+                processing_state=state.value,
+                processed_at=datetime.now(UTC),
+                failure_reason=reason,
+            )
+        )
+        # execute() is typed as Result; an UPDATE always yields a CursorResult,
+        # which is what carries rowcount.
+        if cast("CursorResult[Any]", result).rowcount == 0:
+            raise ConflictError(f"no face sample {face_sample_uuid} to update")
 
     async def find_by_content_hash(self, person_uuid: UUID, image_sha256: str) -> FaceSample | None:
         """Return the person's sample with this content hash, or None."""

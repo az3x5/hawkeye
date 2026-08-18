@@ -17,6 +17,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -68,6 +69,14 @@ face_samples = Table(
     Column("source", String(128), nullable=False),
     Column("captured_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("processing_state", String(32), nullable=False, server_default=text("'pending'")),
+    Column("processed_at", DateTime(timezone=True), nullable=True),
+    Column("failure_reason", Text(), nullable=True),
+    CheckConstraint(
+        "processing_state IN ('pending', 'processed', 'failed')",
+        name="ck_face_sample_processing_state",
+    ),
+    Index("ix_face_samples_processing_state", "processing_state"),
     # Many samples per person is the norm; the same *image* twice is not.
     UniqueConstraint("person_uuid", "image_sha256", name="uq_face_sample_person_content"),
     CheckConstraint("image_sha256 ~ '^[0-9a-f]{64}$'", name="ck_face_sample_sha256"),
