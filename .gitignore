@@ -5,3 +5,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .env
+
+# Model weights: fetched per environment, verified by checksum, never committed.
+models/
