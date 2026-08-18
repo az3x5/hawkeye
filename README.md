@@ -3,8 +3,8 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 3 (AdaFace recognition) complete.** Detection and recognition
-run; enrolment, vector storage and identity decisions do not exist yet — see
+**Status: Phase 4 (Qdrant vector storage) complete.** Detection, recognition
+and vector storage run; enrolment and identity decisions do not exist yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -17,7 +17,7 @@ design the phases build toward.
 | Face detection | SCRFD via onnxruntime |
 | Face recognition | AdaFace IR-101 via PyTorch (CPU) |
 | Metadata | PostgreSQL |
-| Embeddings | Qdrant |
+| Embeddings | Qdrant (one collection per model provenance) |
 | Jobs | Redis |
 | Frontend | Next.js + TypeScript (not yet implemented) |
 
@@ -54,6 +54,13 @@ local migrations and integration tests — remove that mapping outside local
 development. Redis and Qdrant are reachable on the internal `faceid` network
 exclusively; Qdrant holds biometric embeddings and is never published to a host
 or public port.
+
+Integration tests need the vector store reachable from the host; the dev
+overlay publishes it on loopback (the base file deliberately does not):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
 
 Apply migrations:
 

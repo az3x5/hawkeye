@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     String,
     Table,
@@ -72,4 +73,38 @@ face_samples = Table(
     CheckConstraint("image_sha256 ~ '^[0-9a-f]{64}$'", name="ck_face_sample_sha256"),
     Index("ix_face_samples_person", "person_uuid"),
     comment="Face captures. A person has many; no sample is privileged over another.",
+)
+
+face_embeddings = Table(
+    "face_embeddings",
+    metadata,
+    Column("embedding_uuid", PgUUID(as_uuid=True), primary_key=True),
+    Column(
+        "face_sample_uuid",
+        PgUUID(as_uuid=True),
+        ForeignKey("face_samples.face_sample_uuid", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("model_name", String(128), nullable=False),
+    Column("model_version", String(128), nullable=False),
+    Column("preprocessing_version", String(128), nullable=False),
+    Column("vector_collection", String(255), nullable=False),
+    Column("dimension", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    # One embedding per sample per provenance. Re-embedding under a new model
+    # version adds a row rather than overwriting the old one, so a migration
+    # between models is observable instead of destructive.
+    UniqueConstraint(
+        "face_sample_uuid",
+        "model_name",
+        "model_version",
+        "preprocessing_version",
+        name="uq_face_embedding_sample_provenance",
+    ),
+    Index("ix_face_embeddings_collection", "vector_collection"),
+    CheckConstraint("dimension > 0", name="ck_face_embedding_dimension"),
+    comment=(
+        "Metadata for embeddings held in the vector store. The vectors "
+        "themselves live in Qdrant; this table records what produced them."
+    ),
 )

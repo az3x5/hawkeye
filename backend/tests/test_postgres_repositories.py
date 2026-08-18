@@ -267,7 +267,7 @@ async def test_deleting_a_person_removes_their_samples(
 
 
 def test_readyz_reports_postgres_when_the_app_starts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The full application registers its metadata store as a readiness probe."""
+    """The full application registers its storage connectors as readiness probes."""
     from fastapi.testclient import TestClient
 
     from app.api.v1.health import ReadinessResponse
@@ -288,7 +288,9 @@ def test_readyz_reports_postgres_when_the_app_starts(monkeypatch: pytest.MonkeyP
     finally:
         clear_probes()
 
-    assert response.status_code == 200
     body = ReadinessResponse.model_validate(response.json())
-    assert body.status == "ready"
-    assert [(c.name, c.healthy) for c in body.checks] == [("postgres", True)]
+    probes = {c.name: c.healthy for c in body.checks}
+    assert probes["postgres"] is True, f"postgres probe reported {body.checks}"
+    # Qdrant is registered too; whether it is reachable depends on the
+    # environment, so only its presence is asserted here.
+    assert "qdrant" in probes

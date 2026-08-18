@@ -146,13 +146,13 @@ Consequences that are enforced, not merely suggested:
 
 ## 4. Storage
 
-Implemented so far: the PostgreSQL metadata store. The rest remains planned.
+Implemented so far: the PostgreSQL metadata store and the Qdrant vector store.
 
 | Store | Holds | Notes |
 | --- | --- | --- |
 | PostgreSQL | people, external identifiers, face samples (built); embedding metadata, audit log (planned) | system of record |
 | — | embeddings exist in memory only until Phase 4 wires Qdrant | |
-| Qdrant | embedding vectors, keyed by `person_uuid` + sample id | internal network only |
+| Qdrant | embedding vectors, one collection per provenance triple | internal network only |
 | Redis | job queue and transient state | not a system of record |
 | Object store | source images / face crops | via a connector |
 
@@ -161,7 +161,40 @@ Every stored embedding records `model_name`, `model_version` and
 a model upgrade means a re-embedding pass, not a silent mixed index.
 
 Qdrant is never exposed publicly. It carries biometric material, and the
-compose topology gives it no published port.
+compose topology gives it no published port. Integration tests reach it
+through `docker-compose.dev.yml`, an overlay that publishes it on loopback for
+local development only — deliberately a separate file, so the base topology
+stays the shape we want deployed.
+
+### Vector storage
+
+**Collections are named after the provenance triple.** Rather than trusting
+every query to remember that vectors from different models or preprocessing
+are incomparable, `collection_name()` derives the collection from
+`(model_name, model_version, preprocessing_version)`. Incomparable vectors land
+in physically separate indexes, so a cross-provenance search returns nothing
+instead of returning nonsense. Changing any element of the triple maps to a
+different collection.
+
+**Point identity is the face sample.** A point's id is its `face_sample_uuid`,
+so re-writing a sample replaces it rather than accumulating duplicates — the
+property enrolment idempotency will rest on.
+
+**Payloads carry identifiers only**: `person_uuid`, `face_sample_uuid` and the
+provenance triple. No images, no names, no free text. A test asserts the payload
+key set exactly, so widening it is a deliberate act rather than a drift.
+
+**Search returns scores, not verdicts.** `search()` has no score cut-off, by
+design: filtering by similarity *is* an identity decision, and the threshold
+expressing it belongs to the layer that owns such decisions. Scores are raw
+cosine similarity in [-1, 1]; a test asserts a negative score is reachable,
+which is the clearest possible proof they are not probabilities.
+
+`face_embeddings` in PostgreSQL records what was embedded, under what
+provenance, and into which collection. It is unique over
+`(face_sample_uuid, model_name, model_version, preprocessing_version)`, so
+re-embedding under a new model version adds a row rather than overwriting —
+making a model migration observable instead of destructive.
 
 ### Schema
 

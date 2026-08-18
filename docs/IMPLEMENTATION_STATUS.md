@@ -207,22 +207,81 @@ decisions, no audit log, no frontend.
   repository, so no third-party code is executed to load a checkpoint.
 - `Flatten` uses `reshape`, not `view`: the preceding block can leave a
   non-contiguous tensor, which `view` rejects.
-- Recognition is verified on the host, **not yet inside the container image**:
-  installing torch during `docker build` repeatedly fails in this sandbox with
-  read timeouts from both `download.pytorch.org` and `files.pythonhosted.org`.
-  The running container therefore still serves the Phase 2 image. This is an
-  environment limitation rather than a defect, but it means the in-container
-  claim made for Phase 2 has no Phase 3 equivalent yet.
+- Recognition **is** now verified inside the container image. The torch install
+  during `docker build` failed repeatedly with read timeouts in this sandbox
+  and only succeeded on a later retry; the resulting image reports
+  `adaface_ir101_webface12m`, model version `2ea535a43877…`, dimension 512,
+  unit-norm embeddings, self-similarity 1.0, and a preprocessing version shared
+  with the detector. The earlier "not yet verified in the container" note is
+  superseded.
 - torch pushes the image well past its previous 500MB. Since recognition is
   meant to run in a worker rather than the API process, splitting the image is
   worth doing before this grows further.
-## Phase 4 — Qdrant connector + vector storage — ⬜ NOT STARTED
+## Phase 4 — Qdrant connector + vector storage — ✅ COMPLETE
+
+Vector persistence and nearest-neighbour search, with provenance isolation
+enforced structurally rather than by convention.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| `StoredEmbedding`, `VectorMatch`, `VectorRepository` protocol | `backend/app/domain/vectors.py` |
+| Collection naming derived from the provenance triple | `backend/app/connectors/qdrant/naming.py` |
+| `QdrantConnector` (client lifecycle, `ping`) | `backend/app/connectors/qdrant/connector.py` |
+| `QdrantVectorRepository` (upsert, search, get, delete) | `backend/app/connectors/qdrant/repository.py` |
+| `face_embeddings` metadata table + revision `b8265d112b06` | `backend/app/connectors/postgres/tables.py`, `backend/migrations/` |
+| Qdrant registered as a readiness probe | `backend/app/main.py` |
+| Loopback overlay for local integration tests | `docker-compose.dev.yml` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Embeddings round-trip through the store | integration test | ✅ vector recovered within 1e-6 |
+| Re-writing a sample replaces, never duplicates | integration test | ✅ one point, new vector |
+| A person may hold many embeddings | 3 samples, one person | ✅ all returned |
+| Search orders by similarity, best first | integration test | ✅ self-match ≈ 1.0, descending |
+| Scores are similarities, not probabilities | search with an inverted vector | ✅ negative score returned |
+| Search never crosses provenance | identical vector under a second model version | ✅ no results |
+| Any provenance change maps to a new collection | parametrised over all three fields | ✅ |
+| Mixed-provenance writes are refused | integration test | ✅ `ValueError` |
+| A person can be excluded from a search | integration test | ✅ only other people returned |
+| Deleting a person removes only their vectors | integration test | ✅ count returned, others intact |
+| Absent collections are handled, not crashed | search/get/delete before creation | ✅ empty, None, 0 |
+| Payload carries identifiers and provenance only | exact key-set assertion | ✅ no images or free text |
+| Qdrant satisfies `StorageConnector` | protocol check + `ping` | ✅ |
+| Readiness covers both stores | app startup registers postgres and qdrant | ✅ |
+| Base topology still publishes no Qdrant port | `docker compose config` on the base file | ✅ `ports: NONE` |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 197 passed; 115 passed + 82 skipped with nothing available |
+
+### Deliberately NOT in Phase 4
+
+No enrolment flow, no HTTP endpoints, no identity decisions, no matching
+thresholds, no audit log, no frontend. `search()` deliberately has no score
+cut-off.
+
+### Notes
+
+- `qdrant-client` was missing from `pyproject.toml` at first and the container
+  crashed on import. Declared now, but the image has **not been rebuilt since**,
+  so Phase 4 is verified on the host and *not* yet inside the container image.
+- The client's background version handshake raises on unreachable servers and
+  turned a clean connection error into an unhandled thread exception under
+  `filterwarnings = ["error"]`; it is disabled, with readiness reported by
+  `ping()` instead.
 
 Planned: the Qdrant `StorageConnector`, collections keyed by `person_uuid` plus
 sample id, embedding-provenance rows in PostgreSQL, and a guarantee that
 vectors from different provenance triples never share an index. Qdrant stays
 unpublished.
 ## Phase 5 — Idempotent enrolment + Redis jobs — ⬜ NOT STARTED
+
+Planned: the first externally visible endpoints. Enrolment keyed on
+(source, external identifier) plus image content hash so retries converge on
+the same `person_uuid` and the same sample, detection and recognition driven
+from a Redis-backed worker rather than the request path, and request/response
+schemas with validation, structured errors and tests for every endpoint.
 ## Phase 6 — Identity decision layer, configurable thresholds, audit log — ⬜ NOT STARTED
 ## Phase 7 — Next.js + TypeScript review frontend — ⬜ NOT STARTED
 

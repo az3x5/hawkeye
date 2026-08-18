@@ -1,0 +1,11 @@
+# Local development overlay.
+#
+# Publishes the vector store on loopback so migrations and integration tests
+# can reach it from the host. Kept out of docker-compose.yml on purpose: the
+# base topology stays the shape we want deployed, where Qdrant holds biometric
+# embeddings and has no published port at all.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  qdrant:
+    ports: ["127.0.0.1:6333:6333"]

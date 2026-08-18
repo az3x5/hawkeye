@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.api.v1.health import router as health_router
 from app.connectors.postgres import PostgresConnector
+from app.connectors.qdrant import QdrantConnector
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -38,9 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.postgres = postgres
     register_probe(postgres.provider, postgres.ping)
 
+    qdrant = QdrantConnector(settings.qdrant_url, api_key=settings.qdrant_api_key)
+    app.state.qdrant = qdrant
+    register_probe(qdrant.provider, qdrant.ping)
+
     try:
         yield
     finally:
+        await qdrant.close()
         await postgres.close()
         clear_probes()
         logger.info("faceid service stopping")
