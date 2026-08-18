@@ -3,8 +3,8 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 1 (Person & Face domain + persistence) complete.** No
-detection, recognition, enrolment or matching exists yet — see
+**Status: Phase 2 (SCRFD detection) complete.** Detection runs; recognition,
+enrolment and matching do not exist yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -14,7 +14,7 @@ design the phases build toward.
 | Concern | Technology |
 | --- | --- |
 | Backend | FastAPI |
-| Face detection | SCRFD (not yet implemented) |
+| Face detection | SCRFD via onnxruntime |
 | Face recognition | AdaFace (not yet implemented) |
 | Metadata | PostgreSQL |
 | Embeddings | Qdrant |
@@ -29,6 +29,7 @@ backend/
     api/v1/      HTTP layer: routers, request/response schemas
     core/        config, logging, error envelope, readiness registry
     adapters/    model adapter seam — the only route to AI models
+      scrfd.py, preprocessing.py, factory.py
     connectors/  storage connector seam — the only route to storage providers
       postgres/  metadata store: tables, connector, repositories
     domain/      entities and repository interfaces (no ORM, no HTTP)
@@ -78,12 +79,40 @@ Run the checks from the `backend/` directory:
 PYTHONPATH=. ../.venv/bin/pytest -q && ../.venv/bin/ruff check . && ../.venv/bin/mypy
 ```
 
-Database integration tests are skipped unless a real database is named
-explicitly, so they can never pass silently against nothing:
+Detection tests are skipped unless the weights are present, and database tests
+unless a real database is named, so neither can pass silently against nothing:
 
 ```bash
 FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid PYTHONPATH=. ../.venv/bin/pytest -q
 ```
+
+## Face detection
+
+Weights are **never committed and never baked into the image**. Fetch the SCRFD
+ONNX file into `./models/` (git-ignored), pin its checksum, and the adapter
+verifies it before every load — refusing to start on a mismatch:
+
+```bash
+FACEID_SCRFD_MODEL_PATH=/srv/models/scrfd_10g_bnkps.onnx
+FACEID_SCRFD_MODEL_SHA256=5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91
+```
+
+`docker-compose.yml` mounts `./models` read-only at `/srv/models`.
+
+Detection thresholds are configuration, not constants — tune them per
+deployment and population:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `FACEID_SCRFD_SCORE_THRESHOLD` | `0.5` | Minimum confidence for a detection |
+| `FACEID_SCRFD_NMS_IOU_THRESHOLD` | `0.4` | Overlap above which duplicates are suppressed |
+| `FACEID_SCRFD_INPUT_SIZE` | `640` | Network input side, a multiple of 32 |
+
+The detector reports `model_name`, `model_version` (the weights' own SHA-256)
+and `preprocessing_version`, so any embedding derived from a crop can record
+exactly what produced it. It is not wired into the API process: detection is
+expected to run in a worker, and loading weights into every web process before
+anything uses them would be waste.
 
 ## Configuration
 

@@ -54,7 +54,7 @@ operation of the identity layer, not an assumption baked into storage.
 Two seams are load-bearing:
 
 **Model adapters** (`app/adapters/base.py`). AI models are reached only through
-`ModelAdapter`. Model code never imports FastAPI or touches a request object;
+`ModelAdapter`. SCRFD detection is the first implementation. Model code never imports FastAPI or touches a request object;
 a test enforces this (`tests/test_seams.py`). Every adapter must expose
 `model_name`, `model_version` and `preprocessing_version` — these are recorded
 with each embedding so that a model or preprocessing change is detectable
@@ -63,6 +63,42 @@ rather than silently corrupting the vector space.
 **Storage connectors** (`app/connectors/base.py`). Providers are reached only
 through `StorageConnector`. The application depends on the interface, not on
 `psycopg`, `qdrant-client` or a specific object-store SDK.
+
+## 2a. Detection
+
+`SCRFDDetector` (`app/adapters/scrfd.py`) runs SCRFD through onnxruntime and
+returns geometry: boxes, confidences and five keypoints. It reports *where*
+faces are, never *whose* they are.
+
+**Weights.** Supplied per environment as a mounted file and verified against a
+configured SHA-256 before loading. `model_version` is that same digest — the
+version is derived from the bytes rather than a hand-written label, so a
+swapped weights file cannot masquerade as its predecessor. Loading without a
+configured checksum is permitted but logged as a warning, never silent.
+
+**Thresholds.** Score and NMS thresholds live on `SCRFDConfig`, populated from
+settings. They are policy: they vary by deployment, population and risk
+appetite, and a value baked into a function cannot be reviewed, tuned or
+explained after a contested decision.
+
+**Preprocessing.** Letterbox resize with bottom-right padding only, so mapping
+detections back to original coordinates is a pure division by the scale with no
+offset to forget. Decoding, NMS and alignment are pure functions in
+`app/adapters/preprocessing.py`, independently testable without weights.
+
+**Alignment.** Detected faces are warped onto the canonical ArcFace 112x112
+five-point template using a deterministic Umeyama fit — not a RANSAC estimator,
+so the same input always gives the same crop. Recognition models are trained on
+this geometry; feeding them raw boxes instead is a common cause of silently
+degraded accuracy. Each crop carries `preprocessing_version`, which must be
+bumped whenever a change would alter the pixels a model sees, because
+embeddings produced under different preprocessing are not comparable.
+
+**Multiple faces.** Detection returns every face found, ordered by confidence.
+Nothing assumes one face per image, and the same person may appear twice.
+
+The detector is deliberately *not* loaded in the API process: detection belongs
+in a worker, and no endpoint exposes it yet.
 
 ## 3. Recognition vs. identity decision
 

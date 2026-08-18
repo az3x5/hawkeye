@@ -12,7 +12,11 @@ services:
       FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_SCRFD_MODEL_PATH: /srv/models/scrfd_10g_bnkps.onnx
+      FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
     ports: ["127.0.0.1:8000:8000"]
+    # Weights are mounted read-only, never baked into the image or committed.
+    volumes: ["./models:/srv/models:ro"]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

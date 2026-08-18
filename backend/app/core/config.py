@@ -8,6 +8,7 @@ the application refuses to start without them.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn
@@ -35,6 +36,23 @@ class Settings(BaseSettings):
     redis_dsn: RedisDsn
     qdrant_url: str = Field(min_length=1)
     qdrant_api_key: str | None = None
+
+    # Face detection. Weights are supplied per environment as a mounted file
+    # and verified against a checksum; they are never committed or baked in.
+    scrfd_model_path: Path | None = Field(
+        default=None, description="Filesystem path to the SCRFD ONNX weights."
+    )
+    scrfd_model_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Expected SHA-256 of the weights. Loading warns when unset.",
+    )
+    # Detection thresholds are configuration, not constants: they are policy,
+    # they differ per deployment and population, and a value baked into code
+    # cannot be reviewed or explained after a contested decision.
+    scrfd_score_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
+    scrfd_nms_iou_threshold: float = Field(default=0.4, gt=0.0, le=1.0)
+    scrfd_input_size: int = Field(default=640, multiple_of=32, ge=32)
 
     @property
     def debug(self) -> bool:
