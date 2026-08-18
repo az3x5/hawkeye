@@ -15,16 +15,16 @@ class _Body(BaseModel):
 
 
 @pytest.fixture
-def error_client(app: FastAPI) -> TestClient:
-    @app.post("/api/v1/_test/echo")
+def error_client(probe_app: FastAPI) -> TestClient:
+    @probe_app.post("/api/v1/_test/echo")
     async def echo(body: _Body) -> _Body:  # pragma: no cover - exercised via HTTP
         return body
 
-    @app.get("/api/v1/_test/boom")
+    @probe_app.get("/api/v1/_test/boom")
     async def boom() -> None:  # pragma: no cover - exercised via HTTP
         raise ServiceUnavailableError("qdrant is down")
 
-    return TestClient(app)
+    return TestClient(probe_app)
 
 
 def test_unknown_route_uses_the_error_envelope(client: TestClient) -> None:

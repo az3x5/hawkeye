@@ -84,11 +84,13 @@ Consequences that are enforced, not merely suggested:
   per population and per risk appetite — and because a threshold baked into
   code cannot be reviewed, tuned or explained after a contested decision.
 
-## 4. Storage (planned)
+## 4. Storage
+
+Implemented so far: the PostgreSQL metadata store. The rest remains planned.
 
 | Store | Holds | Notes |
 | --- | --- | --- |
-| PostgreSQL | people, external identifiers, face samples, embedding metadata, audit log | system of record |
+| PostgreSQL | people, external identifiers, face samples (built); embedding metadata, audit log (planned) | system of record |
 | Qdrant | embedding vectors, keyed by `person_uuid` + sample id | internal network only |
 | Redis | job queue and transient state | not a system of record |
 | Object store | source images / face crops | via a connector |
@@ -99,6 +101,33 @@ a model upgrade means a re-embedding pass, not a silent mixed index.
 
 Qdrant is never exposed publicly. It carries biometric material, and the
 compose topology gives it no published port.
+
+### Schema
+
+`persons` holds nothing but `person_uuid` and timestamps: everything an
+upstream system might change lives in a satellite table, so upstream churn is
+never a migration of the key.
+
+`person_external_identifiers` is unique over `(source, kind, value)`. That
+constraint is the whole point — it encodes that an identifier means something
+only within the system that issued it, and that within that system it denotes
+exactly one person. `kind` is constrained to `id` and `local_id`.
+
+`face_samples` is unique over `(person_uuid, image_sha256)`. Many samples per
+person is the expected case and carries no constraint; the *same image* twice
+for one person is what gets rejected. The same image may legitimately belong to
+two different people — the constraint is deliberately scoped per person and
+does not assume otherwise.
+
+Both satellite tables cascade on delete from `persons`, so removing a person
+removes their biometric material rather than orphaning it.
+
+### Repository interfaces
+
+`app/domain/repositories.py` declares `PersonRepository` and
+`FaceSampleRepository` as protocols; `app/connectors/postgres/` implements them
+with SQLAlchemy Core. Domain entities are plain frozen dataclasses with no ORM
+base class, so the domain layer has no dependency on how it is stored.
 
 ## 5. Enrolment is idempotent (planned)
 

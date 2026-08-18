@@ -3,8 +3,8 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 0 (Foundation & Contracts) complete.** No detection,
-recognition, enrolment or matching exists yet — see
+**Status: Phase 1 (Person & Face domain + persistence) complete.** No
+detection, recognition, enrolment or matching exists yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -30,7 +30,9 @@ backend/
     core/        config, logging, error envelope, readiness registry
     adapters/    model adapter seam — the only route to AI models
     connectors/  storage connector seam — the only route to storage providers
-    domain/      domain model (empty until Phase 1)
+      postgres/  metadata store: tables, connector, repositories
+    domain/      entities and repository interfaces (no ORM, no HTTP)
+  migrations/    Alembic revisions
   tests/
 docs/
 docker-compose.yml
@@ -46,9 +48,17 @@ cp .env.example .env    # then edit; .env is git-ignored
 docker compose up -d --build
 ```
 
-The API is published on `127.0.0.1:8000` only. Postgres, Redis and Qdrant are
-reachable on the internal `faceid` network exclusively — Qdrant holds biometric
-embeddings and is never published to a host or public port.
+The API is published on `127.0.0.1:8000`, and Postgres on `127.0.0.1:5432` for
+local migrations and integration tests — remove that mapping outside local
+development. Redis and Qdrant are reachable on the internal `faceid` network
+exclusively; Qdrant holds biometric embeddings and is never published to a host
+or public port.
+
+Apply migrations:
+
+```bash
+docker compose exec api alembic upgrade head
+```
 
 Check it is up:
 
@@ -68,6 +78,13 @@ Run the checks from the `backend/` directory:
 PYTHONPATH=. ../.venv/bin/pytest -q && ../.venv/bin/ruff check . && ../.venv/bin/mypy
 ```
 
+Database integration tests are skipped unless a real database is named
+explicitly, so they can never pass silently against nothing:
+
+```bash
+FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid PYTHONPATH=. ../.venv/bin/pytest -q
+```
+
 ## Configuration
 
 All settings come from the environment with the `FACEID_` prefix (see
@@ -83,3 +100,14 @@ No credential is defaulted in code and `.env` is git-ignored.
 | GET | `/api/v1/readyz` | Runs every registered dependency probe; 503 if any fails. |
 
 Interactive docs are served at `/docs` in the `local` environment only.
+
+Persistence is not yet reachable over HTTP — the domain and its repositories
+exist, but no enrolment or lookup endpoint has been built.
+
+## Data model
+
+| Table | Holds |
+| --- | --- |
+| `persons` | `person_uuid`, the sole internal key |
+| `person_external_identifiers` | upstream `id` / `local_id`, unique per `(source, kind, value)` |
+| `face_samples` | many captures per person, deduplicated per person by content hash |

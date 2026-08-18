@@ -30,23 +30,23 @@ def test_readyz_reports_no_checks_when_nothing_is_registered(client: TestClient)
     assert body.checks == []
 
 
-def test_readyz_reports_a_registered_healthy_probe(app: FastAPI) -> None:
+def test_readyz_reports_a_registered_healthy_probe(probe_app: FastAPI) -> None:
     async def ok() -> None:
         return None
 
     register_probe("postgres", ok)
-    with TestClient(app) as client:
+    with TestClient(probe_app) as client:
         body = ReadinessResponse.model_validate(client.get("/api/v1/readyz").json())
     assert body.status == "ready"
     assert [(c.name, c.healthy) for c in body.checks] == [("postgres", True)]
 
 
-def test_readyz_returns_503_and_the_reason_when_a_probe_fails(app: FastAPI) -> None:
+def test_readyz_returns_503_and_the_reason_when_a_probe_fails(probe_app: FastAPI) -> None:
     async def broken() -> None:
         raise ConnectionError("qdrant unreachable")
 
     register_probe("qdrant", broken)
-    with TestClient(app) as client:
+    with TestClient(probe_app) as client:
         response = client.get("/api/v1/readyz")
     assert response.status_code == 503
     body = ReadinessResponse.model_validate(response.json())

@@ -9,16 +9,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1.health import router as health_router
+from app.connectors.postgres import PostgresConnector
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
+from app.core.readiness import clear_probes, register_probe
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Log service start and stop around the serving window."""
+    """Open storage connections for the serving window and close them after.
+
+    The Postgres connector registers itself as a readiness probe here, so
+    ``/readyz`` reports the real state of the metadata store.
+    """
     settings: Settings = app.state.settings
     # Re-assert our formatter: the ASGI server configures logging after the
     # app object is built, so this must happen at startup, not import time.
@@ -27,8 +33,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "faceid service starting",
         extra={"environment": settings.environment, "service": settings.service_name},
     )
-    yield
-    logger.info("faceid service stopping")
+
+    postgres = PostgresConnector(str(settings.postgres_dsn), echo=False)
+    app.state.postgres = postgres
+    register_probe(postgres.provider, postgres.ping)
+
+    try:
+        yield
+    finally:
+        await postgres.close()
+        clear_probes()
+        logger.info("faceid service stopping")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
