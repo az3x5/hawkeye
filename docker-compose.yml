@@ -14,6 +14,8 @@ services:
       FACEID_QDRANT_URL: http://qdrant:6333
       FACEID_SCRFD_MODEL_PATH: /srv/models/scrfd_10g_bnkps.onnx
       FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
+      FACEID_ADAFACE_MODEL_PATH: /srv/models/adaface_ir101_webface12m.safetensors
+      FACEID_ADAFACE_MODEL_SHA256: ${FACEID_ADAFACE_MODEL_SHA256:-}
     ports: ["127.0.0.1:8000:8000"]
     # Weights are mounted read-only, never baked into the image or committed.
     volumes: ["./models:/srv/models:ro"]

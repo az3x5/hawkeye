@@ -3,8 +3,8 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 2 (SCRFD detection) complete.** Detection runs; recognition,
-enrolment and matching do not exist yet — see
+**Status: Phase 3 (AdaFace recognition) complete.** Detection and recognition
+run; enrolment, vector storage and identity decisions do not exist yet — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -15,7 +15,7 @@ design the phases build toward.
 | --- | --- |
 | Backend | FastAPI |
 | Face detection | SCRFD via onnxruntime |
-| Face recognition | AdaFace (not yet implemented) |
+| Face recognition | AdaFace IR-101 via PyTorch (CPU) |
 | Metadata | PostgreSQL |
 | Embeddings | Qdrant |
 | Jobs | Redis |
@@ -29,7 +29,7 @@ backend/
     api/v1/      HTTP layer: routers, request/response schemas
     core/        config, logging, error envelope, readiness registry
     adapters/    model adapter seam — the only route to AI models
-      scrfd.py, preprocessing.py, factory.py
+      scrfd.py, adaface.py, iresnet.py, preprocessing.py, factory.py
     connectors/  storage connector seam — the only route to storage providers
       postgres/  metadata store: tables, connector, repositories
     domain/      entities and repository interfaces (no ORM, no HTTP)
@@ -113,6 +113,38 @@ and `preprocessing_version`, so any embedding derived from a crop can record
 exactly what produced it. It is not wired into the API process: detection is
 expected to run in a worker, and loading weights into every web process before
 anything uses them would be waste.
+
+## Face recognition
+
+AdaFace IR-101 (WebFace12M), supplied and verified exactly like the detector's
+weights:
+
+```bash
+FACEID_ADAFACE_MODEL_PATH=/srv/models/adaface_ir101_webface12m.safetensors
+FACEID_ADAFACE_MODEL_SHA256=2ea535a43877bd3de8091903935c783ce335be66a9f8917fae9a7a18ae4bbf56
+```
+
+The backbone is re-implemented in `app/adapters/iresnet.py` rather than
+executed from the weights repository — loading a checkpoint should not mean
+running code fetched alongside it. `load_state_dict` is strict, so any
+divergence from the published architecture fails loudly instead of producing
+quietly wrong embeddings.
+
+**There is no threshold here, by design.** Recognition returns L2-normalised
+512-d embeddings and `cosine_similarity` returns a raw score in `[-1, 1]`. It
+is never mapped onto a probability: that would imply a calibrated model and a
+known population prior, and we have neither. Deciding whether a score means
+"same person" belongs to the identity-decision layer, which does not exist yet.
+
+Embeddings from different `(model_name, model_version, preprocessing_version)`
+triples refuse to be compared — `IncomparableEmbeddingsError` — because such a
+comparison degrades accuracy in a way nothing downstream would notice.
+
+Install CPU-only torch; the default index ships multi-GB CUDA wheels:
+
+```bash
+.venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu -e 'backend[dev]'
+```
 
 ## Configuration
 

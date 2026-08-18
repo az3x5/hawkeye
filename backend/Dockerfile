@@ -7,7 +7,10 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /srv
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+# CPU-only torch: the default index ships CUDA wheels that are several GB and
+# useless without a GPU.
+RUN pip install --no-cache-dir \
+      --extra-index-url https://download.pytorch.org/whl/cpu .
 
 COPY app ./app
 COPY migrations ./migrations

@@ -100,6 +100,30 @@ Nothing assumes one face per image, and the same person may appear twice.
 The detector is deliberately *not* loaded in the API process: detection belongs
 in a worker, and no endpoint exposes it yet.
 
+## 2b. Recognition
+
+`AdaFaceRecognizer` (`app/adapters/adaface.py`) consumes the aligned crops
+detection produces and returns 512-d L2-normalised embeddings.
+
+**Backbone.** IR-101, re-implemented in `app/adapters/iresnet.py` from the
+published architecture rather than executed from the weights repository, and
+loaded with `strict=True` so a mismatch is an error rather than a silent
+partial load. Weights are checksum-verified like the detector's, and
+`model_version` is again the file's own digest.
+
+**Preprocessing continuity.** The recogniser reports the *same*
+`preprocessing_version` as the detector, because the alignment geometry is the
+preprocessing. It refuses an `AlignedFace` carrying a different version: a crop
+produced by older alignment is not valid input to this model.
+
+**Normalisation.** Vectors are L2-normalised so cosine similarity is a plain
+dot product and vector magnitude cannot masquerade as confidence.
+
+**No decisions.** The adapter exposes no `verify`, `identify` or `is_match`,
+and `AdaFaceConfig` carries no threshold — there is deliberately nothing here
+to tune towards a verdict. `cosine_similarity` refuses to compare embeddings
+whose provenance triples differ.
+
 ## 3. Recognition vs. identity decision
 
 These are separated deliberately, and stay separate.
@@ -127,6 +151,7 @@ Implemented so far: the PostgreSQL metadata store. The rest remains planned.
 | Store | Holds | Notes |
 | --- | --- | --- |
 | PostgreSQL | people, external identifiers, face samples (built); embedding metadata, audit log (planned) | system of record |
+| — | embeddings exist in memory only until Phase 4 wires Qdrant | |
 | Qdrant | embedding vectors, keyed by `person_uuid` + sample id | internal network only |
 | Redis | job queue and transient state | not a system of record |
 | Object store | source images / face crops | via a connector |

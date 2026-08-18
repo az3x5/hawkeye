@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     scrfd_nms_iou_threshold: float = Field(default=0.4, gt=0.0, le=1.0)
     scrfd_input_size: int = Field(default=640, multiple_of=32, ge=32)
 
+    # Face recognition. Supplied and verified exactly like the detector's.
+    # There is deliberately no threshold here: recognition reports similarity
+    # scores, and the thresholds that turn scores into identity decisions
+    # belong to the identity-decision layer.
+    adaface_model_path: Path | None = Field(
+        default=None, description="Filesystem path to the AdaFace weights."
+    )
+    adaface_model_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Expected SHA-256 of the weights. Loading warns when unset.",
+    )
+    adaface_device: str = Field(default="cpu", min_length=1)
+    adaface_batch_size: int = Field(default=16, ge=1, le=256)
+
     @property
     def debug(self) -> bool:
         """True only in local development, where docs and debug logs are on."""

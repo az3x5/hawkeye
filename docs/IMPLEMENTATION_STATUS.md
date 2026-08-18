@@ -149,13 +149,70 @@ will use it.
   `models/` and mounted read-only into the container.
 - `scikit-image` is a dev dependency only: it supplies a real photograph of a
   face offline, so detection tests need no network and no committed image.
-## Phase 3 — Recognition (AdaFace adapter) + embedding provenance — ⬜ NOT STARTED
+## Phase 3 — Recognition (AdaFace adapter) + embedding provenance — ✅ COMPLETE
 
-Planned: the AdaFace `ModelAdapter` consuming the aligned crops Phase 2
-produces, emitting embeddings tagged with `model_name`, `model_version` and
-`preprocessing_version`. Similarity scoring only — no thresholds, no
-match/no-match verdicts, no conversion of similarity into probability.
+Real AdaFace IR-101 inference over the aligned crops Phase 2 produces, with
+full embedding provenance and similarity scoring that stops short of any
+verdict.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| `EmbeddingProvenance`, `FaceEmbedding`, `IncomparableEmbeddingsError` | `backend/app/domain/recognition.py` |
+| IR-101 backbone, re-implemented from the published architecture | `backend/app/adapters/iresnet.py` |
+| `AdaFaceRecognizer`, `AdaFaceConfig`, `cosine_similarity` | `backend/app/adapters/adaface.py` |
+| Settings → recogniser construction | `backend/app/adapters/factory.py` |
+| Recognition settings (path, checksum, device, batch size) | `backend/app/core/config.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Real inference, nothing faked | embeddings over the detect→align→embed pipeline | ✅ |
+| Backbone matches the published checkpoint | `load_state_dict(strict=True)` on 917 tensors | ✅ loads with no missing or unexpected keys |
+| Parameter count is plausible for IR-101 | structural test | ✅ ~65M, inside the 60–70M window |
+| Embeddings are 512-d and L2-normalised | shape and norm assertions | ✅ norm 1.0 |
+| A face matches itself | cosine similarity | ✅ 1.000 |
+| Identity survives a 15° rotation | rotate, re-detect, re-align, re-embed | ✅ 0.992 |
+| Identity survives a brightness change | α=0.7 | ✅ 0.997 |
+| A mirrored face still matches | horizontal flip | ✅ 0.973 |
+| Unrelated input scores near zero | face vs. random noise | ✅ −0.017 |
+| Genuine and impostor scores are well separated | difference assertion | ✅ > 0.5 apart |
+| Embedding is deterministic | repeated runs | ✅ identical vectors |
+| Batching matches one-at-a-time | batch_size=2 vs. individual | ✅ agree to 1e-4 |
+| Batch order is preserved | per-index comparison | ✅ |
+| Every embedding carries the full triple | provenance assertions | ✅ name / version / preprocessing_version |
+| `model_version` derives from the weight bytes | compared against `file_sha256` | ✅ |
+| Weights verified before loading | wrong checksum | ✅ `ModelIntegrityError` |
+| Crops from other preprocessing are refused | stale `AlignedFace` | ✅ `RecognitionError` |
+| Embeddings from different provenance never compared | mismatched `model_version` | ✅ `IncomparableEmbeddingsError` |
+| Similarity is not a probability | negative scores are reachable and returned | ✅ |
+| No decision surface exists | absence of `verify` / `identify` / `is_match`; no threshold on the config | ✅ |
+| Input validated before weights are loaded | validation tests pass without weights present | ✅ |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 170 passed; 115 passed + 55 skipped without weights or database |
+
+### Deliberately NOT in Phase 3
+
+No vector storage (embeddings live only in memory until Qdrant lands in Phase
+4), no enrolment, no HTTP endpoint, no thresholds, no matching, no identity
+decisions, no audit log, no frontend.
+
+### Notes
+
+- Weights: `adaface_ir101_webface12m.safetensors`, SHA-256 `2ea535a4…bf56`,
+  from the AdaFace author's own HuggingFace repository. Git-ignored via
+  `models/`, mounted read-only into the container.
+- The backbone is re-implemented rather than imported from the weights
+  repository, so no third-party code is executed to load a checkpoint.
+- `Flatten` uses `reshape`, not `view`: the preceding block can leave a
+  non-contiguous tensor, which `view` rejects.
 ## Phase 4 — Qdrant connector + vector storage — ⬜ NOT STARTED
+
+Planned: the Qdrant `StorageConnector`, collections keyed by `person_uuid` plus
+sample id, embedding-provenance rows in PostgreSQL, and a guarantee that
+vectors from different provenance triples never share an index. Qdrant stays
+unpublished.
 ## Phase 5 — Idempotent enrolment + Redis jobs — ⬜ NOT STARTED
 ## Phase 6 — Identity decision layer, configurable thresholds, audit log — ⬜ NOT STARTED
 ## Phase 7 — Next.js + TypeScript review frontend — ⬜ NOT STARTED
