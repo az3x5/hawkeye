@@ -1,0 +1,72 @@
+/**
+ * Server-side client for the Face ID API.
+ *
+ * Only ever called from server components and route handlers: the API is on an
+ * internal network and is never exposed to the reviewer's browser.
+ */
+
+import type { ApiErrorBody, Identification, ReviewOutcome, ReviewQueue } from "./types";
+
+const BASE_URL = process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
+
+/** An error carrying the API's structured code, so callers can branch on it. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function isErrorBody(value: unknown): value is ApiErrorBody {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "error" in value &&
+    typeof (value as ApiErrorBody).error?.code === "string"
+  );
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: { Accept: "application/json", ...init?.headers },
+    // A review queue that shows stale state is worse than a slow one.
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    if (isErrorBody(body)) {
+      throw new ApiError(response.status, body.error.code, body.error.message);
+    }
+    throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+/** Proposals waiting for a human, oldest first. */
+export function fetchReviewQueue(limit = 50): Promise<ReviewQueue> {
+  return request<ReviewQueue>(`/api/v1/identifications?limit=${limit}`);
+}
+
+/** One identification, including any review already recorded. */
+export function fetchIdentification(id: string): Promise<Identification> {
+  return request<Identification>(`/api/v1/identifications/${id}`);
+}
+
+/** Record a reviewer's conclusion. */
+export function submitReview(
+  id: string,
+  body: { outcome: ReviewOutcome; reviewer: string; note?: string },
+): Promise<Identification> {
+  return request<Identification>(`/api/v1/identifications/${id}/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}

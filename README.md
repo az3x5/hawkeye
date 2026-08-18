@@ -3,9 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 6 (identity decisions, thresholds, audit) complete.** Faces can
-be enrolled, identified and reviewed over HTTP, with every decision audited.
-The review frontend does not exist yet — see
+**Status: Phase 7 (review frontend) complete.** All seven phases are built:
+faces can be enrolled, detected, embedded, identified, decided on and reviewed
+through a web UI, with every decision audited — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -20,7 +20,7 @@ design the phases build toward.
 | Metadata | PostgreSQL |
 | Embeddings | Qdrant (one collection per model provenance) |
 | Jobs | Redis |
-| Frontend | Next.js + TypeScript (not yet implemented) |
+| Frontend | Next.js 16 + React 19 + TypeScript (strict) |
 
 ## Layout
 
@@ -34,8 +34,13 @@ backend/
     connectors/  storage connector seam — the only route to storage providers
       postgres/  metadata store: tables, connector, repositories
     domain/      entities and repository interfaces (no ORM, no HTTP)
+    services/    orchestration: enrolment, identification
+    worker.py    embedding worker process
   migrations/    Alembic revisions
   tests/
+frontend/
+  src/app/       review queue, review detail, runtime API proxy
+  src/lib/       API client, types, formatting
 docs/
 docker-compose.yml
 ```
@@ -158,6 +163,29 @@ Install CPU-only torch; the default index ships multi-GB CUDA wheels:
 .venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/cpu -e 'backend[dev]'
 ```
 
+## Review frontend
+
+A Next.js app on `127.0.0.1:3000` showing the queue of proposals the system
+declined to decide alone, each with the query image beside every candidate's
+best-matching sample, the scores, the margin, and the thresholds in force.
+
+The reviewer's browser never talks to the API. Images and the review write go
+through a **runtime proxy with an allowlist** (`src/app/api/v1/[...path]`),
+so the API needs no public exposure, no CORS, and enrolment and identification
+are not reachable from a browser at all. Scores are rendered as the raw
+similarities they are — never as percentages, which would invite reading them
+as probabilities.
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Checks:
+
+```bash
+cd frontend && npm run typecheck && npm run lint && npm test
+```
+
 ## Configuration
 
 All settings come from the environment with the `FACEID_` prefix (see
@@ -175,7 +203,10 @@ No credential is defaulted in code and `.env` is git-ignored.
 | GET | `/api/v1/face-samples/{uuid}` | Read a sample's processing state. |
 | POST | `/api/v1/identifications` | Propose who a face belongs to. Audited. |
 | GET | `/api/v1/identifications/{uuid}` | Read a past decision and its policy. |
+| GET | `/api/v1/identifications` | List proposals awaiting review, oldest first. |
 | POST | `/api/v1/identifications/{uuid}/review` | Record a human's conclusion. Audited. |
+| GET | `/api/v1/identifications/{uuid}/image` | The submitted query image. |
+| GET | `/api/v1/face-samples/{uuid}/image` | An enrolled sample image. |
 
 Enrol a face:
 

@@ -27,6 +27,7 @@ from app.domain.identity import (
     StoredIdentification,
     decide,
 )
+from app.domain.jobs import ObjectStore
 from app.domain.recognition import FaceEmbedding
 from app.domain.repositories import ConflictError
 from app.domain.vectors import VectorRepository
@@ -57,6 +58,7 @@ class IdentificationService:
         audit: AuditLog,
         thresholds: DecisionThresholds,
         candidate_limit: int,
+        objects: ObjectStore | None = None,
         detector: object | None = None,
         recognizer: object | None = None,
     ) -> None:
@@ -72,6 +74,7 @@ class IdentificationService:
         self._audit = audit
         self._thresholds = thresholds
         self._candidate_limit = candidate_limit
+        self._objects = objects
         self._detector = detector
         self._recognizer = recognizer
 
@@ -108,6 +111,10 @@ class IdentificationService:
 
         identification_uuid = uuid4()
         query_sha256 = sha256_bytes(query_bytes)
+        # Retain the query so a reviewer can see what was actually submitted.
+        # Without it, a review is a judgement about an image nobody can look at.
+        if self._objects is not None:
+            await self._objects.put(query_sha256, query_bytes)
         await self._store.add(identification_uuid, query_sha256, decision)
 
         best = decision.best

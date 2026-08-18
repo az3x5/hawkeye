@@ -32,6 +32,17 @@ services:
       qdrant: {condition: service_started}
     networks: [faceid]
 
+  frontend:
+    build: ./frontend
+    image: faceid-review:dev
+    environment:
+      # Server-side only: the browser never reaches the API directly, so the
+      # API needs no public exposure and no CORS.
+      FACEID_API_URL: http://api:8000
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+    networks: [faceid]
+
   worker:
     build: ./backend
     image: faceid-api:dev

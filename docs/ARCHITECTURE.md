@@ -354,3 +354,34 @@ response schema, validation, and tests. All non-2xx responses use one envelope:
 
 `code` is stable and machine-readable; `message` is for humans. Errors are
 raised as `FaceIdError` subclasses that carry their own status and code.
+
+## 9. Review frontend
+
+A Next.js + TypeScript app whose only job is to present what the API already
+decided. It contains **no decision logic**: no thresholds, no aggregation, no
+notion of what counts as a match. Duplicating any of that in the browser would
+create a second, unauditable policy.
+
+**The browser never reaches the API.** Server components fetch over the
+internal network; the two image reads and the review write that must happen
+from the browser go through a runtime proxy route with an explicit allowlist.
+Enrolment, identification and the queue are not reachable from a browser at
+all. The proxy is a route handler rather than a `rewrites()` rule because a
+rewrite destination is baked in at build time and cannot follow an environment
+variable set at deploy time.
+
+**Scores are rendered literally.** `formatScore` prints the cosine similarity
+to four decimals and never a percentage: a percentage reads as a probability,
+and these are not probabilities. Negative similarities display as negative. The
+margin to the runner-up is shown, and flagged when narrow, but the UI never
+changes the proposal on that basis — it is information for the reviewer, not a
+second decision layer.
+
+**Reviews are attributed and final.** The form requires the reviewer's identity
+because the decision is written to the audit log, and it says plainly that the
+record cannot be changed afterwards. A proposal that was decided automatically
+shows no review controls at all, matching the API rule that only `review`
+outcomes may be reviewed.
+
+**Biometric images** are served with `Cache-Control: private, no-store` at both
+the API and the proxy, and the page is marked `noindex, nofollow`.

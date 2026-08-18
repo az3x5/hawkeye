@@ -211,3 +211,11 @@ class IdentificationStore(Protocol):
     ) -> None:
         """Attach a human's conclusion. Refuses to overwrite an existing one."""
         ...
+
+    async def awaiting_review(self, *, limit: int) -> Sequence[StoredIdentification]:
+        """Return unreviewed proposals that asked for a human, oldest first.
+
+        Oldest first because a review queue is a backlog: the item that has
+        been waiting longest is the one most in need of attention.
+        """
+        ...

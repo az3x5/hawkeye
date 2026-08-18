@@ -86,9 +86,18 @@ async def get_identification_service(
             audit=SqlAlchemyAuditLog(session),
             thresholds=_thresholds(request),
             candidate_limit=settings.decision_candidate_limit,
+            objects=getattr(request.app.state, "objects", None),
             detector=getattr(request.app.state, "detector", None),
             recognizer=getattr(request.app.state, "recognizer", None),
         )
+
+
+def get_object_store(request: Request) -> FilesystemObjectStore:
+    """Return the object store holding source images."""
+    objects = getattr(request.app.state, "objects", None)
+    if not isinstance(objects, FilesystemObjectStore):
+        raise ServiceUnavailableError("the object store is not available")
+    return objects
 
 
 async def get_sample_reader(request: Request) -> AsyncIterator[SampleReader]:

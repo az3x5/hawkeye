@@ -130,6 +130,10 @@ class SqlAlchemyIdentificationStore:
         row = result.one_or_none()
         if row is None:
             return None
+        return self._to_stored(row)
+
+    @staticmethod
+    def _to_stored(row: Any) -> StoredIdentification:
         return StoredIdentification(
             identification_uuid=row.identification_uuid,
             query_sha256=row.query_sha256,
@@ -156,6 +160,19 @@ class SqlAlchemyIdentificationStore:
             reviewed_at=row.reviewed_at,
             review_note=row.review_note,
         )
+
+    async def awaiting_review(self, *, limit: int) -> Sequence[StoredIdentification]:
+        """Return unreviewed proposals that asked for a human, oldest first."""
+        result = await self._session.execute(
+            select(identifications)
+            .where(
+                identifications.c.outcome == DecisionOutcome.REVIEW.value,
+                identifications.c.review_outcome.is_(None),
+            )
+            .order_by(identifications.c.created_at)
+            .limit(limit)
+        )
+        return [self._to_stored(row) for row in result.all()]
 
     async def record_review(
         self,

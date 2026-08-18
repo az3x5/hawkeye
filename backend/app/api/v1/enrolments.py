@@ -6,10 +6,15 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import get_enrolment_service, get_sample_reader
+from app.api.v1.dependencies import (
+    get_enrolment_service,
+    get_object_store,
+    get_sample_reader,
+)
+from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.jobs import ProcessingState
 from app.domain.models import DomainValidationError
@@ -156,6 +161,38 @@ async def create_enrolment(
         raise ConflictingIdentifiersError(str(exc)) from exc
 
     return _to_response(result.person.person_uuid, result.sample, result.created)
+
+
+@router.get(
+    "/face-samples/{face_sample_uuid}/image",
+    summary="Fetch an enrolled face sample image",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/jpeg": {}}},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def read_face_sample_image(
+    face_sample_uuid: UUID,
+    reader: Annotated[SampleReader, Depends(get_sample_reader)],
+    objects: Annotated[FilesystemObjectStore, Depends(get_object_store)],
+) -> Response:
+    """Return an enrolled image so a reviewer can compare it with a query.
+
+    Served only for a known sample, never by raw content hash.
+    """
+    sample = await reader.get(face_sample_uuid)
+    if sample is None:
+        raise SampleNotFoundError(f"no face sample {face_sample_uuid}")
+    data = await objects.get(sample.image_sha256)
+    if data is None:
+        raise SampleNotFoundError(f"the image for {face_sample_uuid} is no longer stored")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.get(

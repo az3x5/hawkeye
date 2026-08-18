@@ -408,12 +408,65 @@ the caller.
   the type checker.
 - Identification loads the models in the API process, unlike enrolment: the
   caller is waiting for an answer, so the work cannot be handed to the worker.
-## Phase 7 — Next.js + TypeScript review frontend — ⬜ NOT STARTED
+## Phase 7 — Next.js + TypeScript review frontend — ✅ COMPLETE
 
-Planned: a review queue over the existing endpoints — list identifications
-awaiting review, show the query image beside each candidate's samples with
-scores and margin, and record confirm/reject with the reviewer's identity. No
-new decision logic: the frontend presents what the API already decides.
+A review queue over the existing endpoints, plus the backend additions it
+needed to be usable at all.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Review queue listing (`GET /identifications`) | `backend/app/api/v1/identifications.py` |
+| Query image retention at identification time | `backend/app/services/identification.py` |
+| Image endpoints for query and enrolled samples | `backend/app/api/v1/{identifications,enrolments}.py` |
+| `awaiting_review` on the store and its protocol | `backend/app/{domain/identity.py,connectors/postgres/audit.py}` |
+| Review queue page | `frontend/src/app/page.tsx` |
+| Review detail page and form | `frontend/src/app/review/[id]/` |
+| Runtime API proxy with an allowlist | `frontend/src/app/api/v1/[...path]/route.ts` |
+| Typed API client, formatting helpers | `frontend/src/lib/` |
+| Frontend image and compose service | `frontend/Dockerfile`, `docker-compose.yml` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| The queue lists only proposals awaiting a human | API tests over accept/reject/reviewed | ✅ 1 of 4 |
+| The backlog is oldest first | API test | ✅ |
+| Each entry carries score, margin, candidate count, policy | API test and live page | ✅ |
+| An invalid limit fails validation | parametrised | ✅ 422 |
+| The submitted query image is retained and served | live through the frontend | ✅ 200 image/jpeg |
+| Enrolled sample images are served | live | ✅ 200 image/jpeg |
+| Images are not reachable by content hash alone | API test | ✅ 422/404 |
+| Biometric images are not shared-cacheable | header assertions, API and proxy | ✅ `private, no-store` |
+| The proxy forwards only what a reviewer needs | unit tests and live | ✅ `/enrolments` → 404 `not_proxied` |
+| A read-only path refuses a write | unit test | ✅ |
+| Scores never render as percentages | unit tests on the formatter | ✅ raw similarities, negatives preserved |
+| A narrow margin is flagged, not acted on | unit test and page copy | ✅ |
+| The frontend carries no decision logic | no thresholds or aggregation in `frontend/src` | ✅ presents API output only |
+| Reviews require an attributed reviewer | form validation | ✅ submit disabled until named |
+| An automatic decision shows no review controls | detail page branch | ✅ explains why instead |
+| A recorded review is shown as final | detail page branch, live | ✅ "cannot be changed" |
+| Full loop works in containers | queue → detail → confirm → audit | ✅ both audit rows with correct actor kinds |
+| Frontend typecheck, lint, tests, build | tsc --noEmit, eslint, vitest, next build | ✅ 17 tests, 0 errors |
+| Backend lint, types, tests | ruff, mypy --strict, pytest | ✅ 353 passed |
+
+### Deliberately NOT in Phase 7
+
+No authentication — the reviewer types their own name and nothing verifies it
+(see Known issues). No merge or split UI, no person browser, no enrolment UI,
+no pagination beyond a limit.
+
+### Notes
+
+- Two container-only bugs, both caught by running it: Next bound to localhost
+  inside the container and was unreachable, and the `rewrites()` proxy baked
+  the build-time fallback address into the build output. The second was
+  replaced with a runtime route handler, which is also narrower than the
+  blanket passthrough it replaced.
+- The frontend needed three backend additions to be usable, so they are part
+  of this phase rather than a phase of their own: the queue listing, query
+  image retention, and the two image endpoints.
 
 ## Known issues
 

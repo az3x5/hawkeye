@@ -6,11 +6,16 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import get_identification_service, get_identification_store
+from app.api.v1.dependencies import (
+    get_identification_service,
+    get_identification_store,
+    get_object_store,
+)
 from app.api.v1.enrolments import read_image_upload
+from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.audit import Actor
 from app.domain.identity import (
@@ -23,6 +28,9 @@ from app.domain.identity import (
 from app.services.identification import IdentificationError, IdentificationService
 
 router = APIRouter(tags=["identification"])
+
+#: Biometric images must not linger in shared caches.
+_PRIVATE_CACHE = {"Cache-Control": "private, no-store"}
 
 
 class IdentificationFailedError(FaceIdError):
@@ -159,6 +167,86 @@ async def create_identification(
     except IdentificationError as exc:
         raise IdentificationFailedError(str(exc)) from exc
     return _decision_response(result.identification_uuid, result.decision)
+
+
+class IdentificationSummary(BaseModel):
+    """One entry in the review queue."""
+
+    identification_uuid: UUID
+    outcome: DecisionOutcome
+    created_at: datetime
+    best_person_uuid: UUID | None = None
+    best_score: float | None = None
+    margin: float | None = None
+    candidate_count: int
+    policy_version: str
+
+
+class ReviewQueueResponse(BaseModel):
+    """Proposals waiting for a human."""
+
+    items: list[IdentificationSummary]
+    count: int = Field(description="Number of entries returned, not the total backlog.")
+
+
+@router.get(
+    "/identifications",
+    response_model=ReviewQueueResponse,
+    summary="List identifications awaiting review",
+    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def list_identifications(
+    store: Annotated[IdentificationStore, Depends(get_identification_store)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> ReviewQueueResponse:
+    """Return unreviewed proposals that asked for a human, oldest first."""
+    pending = await store.awaiting_review(limit=limit)
+    items = [
+        IdentificationSummary(
+            identification_uuid=stored.identification_uuid,
+            outcome=stored.decision.outcome,
+            created_at=stored.created_at,
+            best_person_uuid=stored.decision.best.person_uuid if stored.decision.best else None,
+            best_score=stored.decision.best.score if stored.decision.best else None,
+            margin=stored.decision.margin,
+            candidate_count=len(stored.decision.candidates),
+            policy_version=stored.decision.thresholds.policy_version,
+        )
+        for stored in pending
+    ]
+    return ReviewQueueResponse(items=items, count=len(items))
+
+
+@router.get(
+    "/identifications/{identification_uuid}/image",
+    summary="Fetch the query image of an identification",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/jpeg": {}}},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def read_identification_image(
+    identification_uuid: UUID,
+    store: Annotated[IdentificationStore, Depends(get_identification_store)],
+    objects: Annotated[FilesystemObjectStore, Depends(get_object_store)],
+) -> Response:
+    """Return the image that was submitted, so a reviewer can see it.
+
+    This is biometric material: it is served only for a recorded
+    identification, never by raw content hash, so possessing a hash is not
+    enough to retrieve someone's face.
+    """
+    stored = await store.get(identification_uuid)
+    if stored is None:
+        raise IdentificationNotFoundError(f"no identification {identification_uuid}")
+    data = await objects.get(stored.query_sha256)
+    if data is None:
+        raise IdentificationNotFoundError(
+            f"the query image for {identification_uuid} is no longer stored"
+        )
+    return Response(content=data, media_type="image/jpeg", headers=_PRIVATE_CACHE)
 
 
 @router.get(
