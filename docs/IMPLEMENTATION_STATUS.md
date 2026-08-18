@@ -207,6 +207,15 @@ decisions, no audit log, no frontend.
   repository, so no third-party code is executed to load a checkpoint.
 - `Flatten` uses `reshape`, not `view`: the preceding block can leave a
   non-contiguous tensor, which `view` rejects.
+- Recognition is verified on the host, **not yet inside the container image**:
+  installing torch during `docker build` repeatedly fails in this sandbox with
+  read timeouts from both `download.pytorch.org` and `files.pythonhosted.org`.
+  The running container therefore still serves the Phase 2 image. This is an
+  environment limitation rather than a defect, but it means the in-container
+  claim made for Phase 2 has no Phase 3 equivalent yet.
+- torch pushes the image well past its previous 500MB. Since recognition is
+  meant to run in a worker rather than the API process, splitting the image is
+  worth doing before this grows further.
 ## Phase 4 — Qdrant connector + vector storage — ⬜ NOT STARTED
 
 Planned: the Qdrant `StorageConnector`, collections keyed by `person_uuid` plus

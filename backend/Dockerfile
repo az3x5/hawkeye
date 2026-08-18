@@ -9,7 +9,7 @@ WORKDIR /srv
 COPY pyproject.toml ./
 # CPU-only torch: the default index ships CUDA wheels that are several GB and
 # useless without a GPU.
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --timeout 180 --retries 20 \
       --extra-index-url https://download.pytorch.org/whl/cpu .
 
 COPY app ./app
