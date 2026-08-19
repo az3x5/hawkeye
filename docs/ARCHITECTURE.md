@@ -500,6 +500,22 @@ still exist, and removes the rest. A face with no person attached is the worst
 kind of leftover — still searchable, and no longer attributable to anyone who
 could ask for its removal.
 
-It runs hourly in the worker alongside retention, and its failures are logged
-and swallowed for the same reason: housekeeping must never stop the worker
+### Orphaned images
+
+The counterpart to vector reconciliation, and for the same reason: erasure
+removes a person's images with them, but a crash between deleting the rows and
+deleting the objects would leave a face on disk that nothing points at — still
+biometric data, and now attached to nobody who could ask for its removal.
+
+An object is abandoned when no face sample and no identification names its
+hash. Query images are excluded on that basis, because they are governed by
+retention rather than by this sweep.
+
+**A grace period is essential, not cautious.** Enrolment writes the image
+*before* the row that names it, so sweeping recent objects would race live work
+and delete an image the worker is about to need. Objects untouched for less
+than the grace period are left alone.
+
+All three sweeps run hourly in the worker, and their failures are logged and
+swallowed for the same reason: housekeeping must never stop the worker
 embedding faces.

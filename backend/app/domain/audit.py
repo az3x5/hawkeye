@@ -23,6 +23,7 @@ class AuditAction(StrEnum):
     QUERY_IMAGE_PURGED = "query_image_purged"
     PERSON_ERASED = "person_erased"
     ORPHANED_VECTORS_PURGED = "orphaned_vectors_purged"
+    ORPHANED_IMAGE_PURGED = "orphaned_image_purged"
 
 
 @dataclass(frozen=True, slots=True)

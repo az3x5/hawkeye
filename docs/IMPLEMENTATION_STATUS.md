@@ -632,7 +632,51 @@ kept a searchable face in the vector store.
 
 ### Known gaps after Phase 10
 
+- Erasure is not transactional across the three stores; images left by a crash
+  were not reconciled — **fixed in Phase 11**.
 - No per-person access control; no merge/split; thresholds unvalidated; model
-  weight provenance unresolved; erasure is not transactional across the three
-  stores, so a crash mid-erase can leave images behind (reconciliation covers
-  vectors, but not images).
+  weight provenance unresolved.
+
+## Phase 11 — Orphaned image reconciliation — ✅ COMPLETE
+
+Completes the erasure story symmetrically: vectors were reconciled, images were
+not, so a crash mid-erase could leave a face on disk attached to nobody.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| `list_digests(older_than=...)` on the object store and its protocol | `backend/app/connectors/filesystem/object_store.py`, `backend/app/domain/jobs.py` |
+| `reconcile_orphaned_images` with a grace period | `backend/app/services/erasure.py` |
+| Third hourly sweep in housekeeping | `backend/app/worker.py` |
+| `orphaned_image_purged` action | `backend/app/domain/audit.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| An unreferenced image is removed | integration test | ✅ |
+| An enrolled image is kept | integration test | ✅ |
+| An image a past identification used is kept | integration test | ✅ retention owns those |
+| A recent image is left alone | grace period test | ✅ no race with live enrolment |
+| A dry run reports without deleting | integration test | ✅ |
+| The purge is audited as a system action | audit assertion | ✅ hash and reason recorded |
+| A nonsensical grace period is refused | parametrised | ✅ |
+| Vector and image sweeps together close a partial erasure | end-to-end test | ✅ nothing left behind |
+| Housekeeping runs in the worker without failures | live logs | ✅ purged on first sweep |
+| Nothing referenced was deleted | live audit of disk against rows | ✅ 0 unreferenced remain, 0 referenced query images missing |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 425 passed |
+
+### Notes
+
+- Two `face_samples` rows reference images absent from the container's object
+  store. Both have `source: 'test'`: the integration tests write rows into the
+  shared development database while storing their images in a per-test
+  temporary directory. Not a defect, but it is a reason to give the tests their
+  own database before this gets confusing.
+
+### Known gaps after Phase 11
+
+- No per-person access control; no merge/split; thresholds unvalidated; model
+  weight provenance unresolved.
+- Integration tests share the development database, leaving rows behind.

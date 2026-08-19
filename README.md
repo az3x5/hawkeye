@@ -3,9 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 10 (erasure) complete.** A person can be erased from metadata,
-vectors and image storage together, with an audit record that outlives them —
-see
+**Status: Phase 11 (orphaned image reconciliation) complete.** Erasure spans
+metadata, vectors and images, and housekeeping now reconciles leftovers on both
+the vector and image sides — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -256,9 +256,11 @@ provenance, and their stored images. An image shared with another person's
 sample is kept, so `images_removed` can be lower than `samples_removed`. The
 audit record names who erased them and survives the deletion.
 
-A reconciliation sweep runs hourly in the worker and removes vectors whose
-person no longer exists — leftovers from before erasure existed, or from a
-partial failure.
+Two reconciliation sweeps run hourly in the worker: one removes vectors whose
+person no longer exists, the other removes stored images that no face sample
+and no identification references. Both cover leftovers from before erasure
+existed, or from a partial failure. The image sweep ignores anything written in
+the last hour, because enrolment stores an image before the row that names it.
 
 ## Rate limiting
 

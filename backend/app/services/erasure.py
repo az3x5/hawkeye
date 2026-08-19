@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.connectors.postgres.tables import face_samples, persons
+from app.connectors.postgres.tables import face_samples, identifications, persons
 from app.domain.audit import SYSTEM_ACTOR, Actor, AuditAction, AuditEvent, AuditLog
 from app.domain.jobs import ObjectStore
 from app.domain.vectors import VectorRepository
@@ -169,4 +170,75 @@ async def reconcile_orphaned_vectors(
         "purged orphaned vectors",
         extra={"orphaned_people": len(orphaned), "vectors_removed": removed},
     )
+    return removed
+
+
+#: How long an object must have sat unreferenced before reconciliation will
+#: consider it abandoned. Enrolment writes the image before the row that names
+#: it, so a shorter window would race live work and delete an image the worker
+#: is about to need.
+ORPHANED_IMAGE_GRACE_SECONDS = 3600
+
+
+async def reconcile_orphaned_images(
+    *,
+    session: AsyncSession,
+    objects: ObjectStore,
+    audit: AuditLog,
+    grace_seconds: int = ORPHANED_IMAGE_GRACE_SECONDS,
+    dry_run: bool = False,
+    now: datetime | None = None,
+) -> int:
+    """Remove stored images that nothing references any more.
+
+    The counterpart to vector reconciliation. Erasure removes a person's images
+    with them, but a crash between deleting the rows and deleting the objects
+    would leave a face on disk that nothing points at — still biometric data,
+    and now attached to nobody who could ask for its removal.
+
+    An object is abandoned when no face sample and no identification names its
+    hash, and it has been untouched for the grace period.
+    """
+    if grace_seconds < 1:
+        raise ValueError(f"grace_seconds must be at least 1, got {grace_seconds}")
+
+    cutoff = (now or datetime.now(UTC)) - timedelta(seconds=grace_seconds)
+    stored = await objects.list_digests(older_than=cutoff)
+    if not stored:
+        return 0
+
+    enrolled = await session.execute(
+        select(face_samples.c.image_sha256).where(face_samples.c.image_sha256.in_(stored))
+    )
+    queried = await session.execute(
+        select(identifications.c.query_sha256).where(identifications.c.query_sha256.in_(stored))
+    )
+    referenced = {row.image_sha256 for row in enrolled.all()} | {
+        row.query_sha256 for row in queried.all()
+    }
+
+    abandoned = [digest for digest in stored if digest not in referenced]
+    if not abandoned:
+        return 0
+    if dry_run:
+        logger.warning("orphaned images found", extra={"orphaned_images": len(abandoned)})
+        return len(abandoned)
+
+    removed = 0
+    for digest in abandoned:
+        if not await objects.delete(digest):
+            continue
+        removed += 1
+        await audit.record(
+            AuditEvent(
+                action=AuditAction.ORPHANED_IMAGE_PURGED,
+                actor=SYSTEM_ACTOR,
+                details={
+                    "image_sha256": digest,
+                    "reason": "no face sample or identification references it",
+                },
+            )
+        )
+    if removed:
+        logger.warning("purged orphaned images", extra={"removed": removed})
     return removed

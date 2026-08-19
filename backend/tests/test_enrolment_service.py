@@ -7,6 +7,7 @@ without depending on any storage technology.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -109,6 +110,9 @@ class FakeObjects:
 
     async def delete(self, digest: str) -> bool:
         return self.stored.pop(digest, None) is not None
+
+    async def list_digests(self, *, older_than: datetime | None = None) -> list[str]:
+        return list(self.stored)
 
 
 class FakeQueue:

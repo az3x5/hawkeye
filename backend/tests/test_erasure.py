@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,13 +26,19 @@ from app.connectors.postgres import (
     SqlAlchemyPersonRepository,
     metadata,
 )
-from app.connectors.postgres.audit import SqlAlchemyAuditLog
+from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
 from app.connectors.qdrant import QdrantConnector, QdrantVectorRepository
 from app.domain.audit import SYSTEM_ACTOR, Actor, AuditAction
+from app.domain.identity import DecisionOutcome, DecisionThresholds, IdentityDecision
 from app.domain.models import FaceSample, Person
 from app.domain.recognition import EmbeddingProvenance, FaceEmbedding
 from app.domain.vectors import StoredEmbedding
-from app.services.erasure import PersonEraser, PersonNotFoundError, reconcile_orphaned_vectors
+from app.services.erasure import (
+    PersonEraser,
+    PersonNotFoundError,
+    reconcile_orphaned_images,
+    reconcile_orphaned_vectors,
+)
 
 from .conftest import INTEGRATION_DSN
 
@@ -411,3 +418,203 @@ class TestReconciliation:
                 )
                 == 0
             )
+
+
+class TestOrphanedImages:
+    """Objects nothing references any more.
+
+    The counterpart to vector reconciliation: erasure removes a person's images
+    with them, but a crash between deleting the rows and deleting the objects
+    leaves a face on disk attached to nobody.
+    """
+
+    async def test_an_unreferenced_image_is_removed(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        digest = sha256_bytes(IMAGE)
+        await objects.put(digest, IMAGE)
+
+        async with postgres.session() as session:
+            removed = await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=1,
+                now=datetime.now(UTC) + timedelta(hours=1),
+            )
+        assert removed == 1
+        assert await objects.get(digest) is None
+
+    async def test_an_enrolled_image_is_kept(
+        self,
+        postgres: PostgresConnector,
+        qdrant: QdrantConnector,
+        objects: FilesystemObjectStore,
+    ) -> None:
+        await _enrol(postgres, qdrant, objects, IMAGE)
+
+        async with postgres.session() as session:
+            removed = await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=1,
+                now=datetime.now(UTC) + timedelta(hours=1),
+            )
+        assert removed == 0
+        assert await objects.get(sha256_bytes(IMAGE)) == IMAGE
+
+    async def test_an_image_a_past_identification_used_is_kept(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        """Query images are governed by retention, not by this sweep."""
+        digest = sha256_bytes(OTHER_IMAGE)
+        await objects.put(digest, OTHER_IMAGE)
+        async with postgres.session() as session:
+            await SqlAlchemyIdentificationStore(session).add(
+                uuid4(),
+                digest,
+                IdentityDecision(
+                    outcome=DecisionOutcome.REJECT,
+                    thresholds=DecisionThresholds(
+                        accept_at=0.6, review_at=0.4, policy_version="erasure-v1"
+                    ),
+                    candidates=(),
+                ),
+            )
+
+        async with postgres.session() as session:
+            removed = await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=1,
+                now=datetime.now(UTC) + timedelta(hours=1),
+            )
+        assert removed == 0
+        assert await objects.get(digest) == OTHER_IMAGE
+
+    async def test_a_recent_image_is_left_alone(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        """Enrolment writes the image before the row naming it.
+
+        Sweeping recent objects would race live work and delete an image the
+        worker is about to need.
+        """
+        digest = sha256_bytes(IMAGE)
+        await objects.put(digest, IMAGE)
+
+        async with postgres.session() as session:
+            removed = await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=3600,
+            )
+        assert removed == 0
+        assert await objects.get(digest) == IMAGE
+
+    async def test_a_dry_run_reports_without_deleting(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        digest = sha256_bytes(IMAGE)
+        await objects.put(digest, IMAGE)
+
+        async with postgres.session() as session:
+            found = await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=1,
+                dry_run=True,
+                now=datetime.now(UTC) + timedelta(hours=1),
+            )
+        assert found == 1
+        assert await objects.get(digest) == IMAGE
+
+    async def test_the_purge_is_audited(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        digest = sha256_bytes(IMAGE)
+        await objects.put(digest, IMAGE)
+
+        async with postgres.session() as session:
+            await reconcile_orphaned_images(
+                session=session,
+                objects=objects,
+                audit=SqlAlchemyAuditLog(session),
+                grace_seconds=1,
+                now=datetime.now(UTC) + timedelta(hours=1),
+            )
+        async with postgres.session() as session:
+            rows = await session.execute(
+                text(
+                    "SELECT action, actor_kind, details FROM audit_events "
+                    "WHERE action = 'orphaned_image_purged'"
+                )
+            )
+        events = rows.all()
+        assert len(events) == 1
+        assert events[0].actor_kind == "system"
+        assert events[0].details["image_sha256"] == digest
+
+    async def test_an_empty_store_is_not_an_error(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore
+    ) -> None:
+        async with postgres.session() as session:
+            assert (
+                await reconcile_orphaned_images(
+                    session=session,
+                    objects=objects,
+                    audit=SqlAlchemyAuditLog(session),
+                    grace_seconds=1,
+                )
+                == 0
+            )
+
+    @pytest.mark.parametrize("bad", [0, -1])
+    async def test_a_nonsensical_grace_period_is_refused(
+        self, postgres: PostgresConnector, objects: FilesystemObjectStore, bad: int
+    ) -> None:
+        async with postgres.session() as session:
+            with pytest.raises(ValueError, match="grace_seconds"):
+                await reconcile_orphaned_images(
+                    session=session,
+                    objects=objects,
+                    audit=SqlAlchemyAuditLog(session),
+                    grace_seconds=bad,
+                )
+
+
+async def test_erasure_then_reconciliation_leaves_nothing_behind(
+    postgres: PostgresConnector,
+    qdrant: QdrantConnector,
+    objects: FilesystemObjectStore,
+) -> None:
+    """The two sweeps together close the loop on a partially failed erasure."""
+    person, sample = await _enrol(postgres, qdrant, objects, IMAGE)
+    digest = sha256_bytes(IMAGE)
+
+    # Simulate a crash after the rows went but before the objects did.
+    async with postgres.session() as session:
+        await session.execute(
+            text("DELETE FROM persons WHERE person_uuid = :u"),
+            {"u": str(person.person_uuid)},
+        )
+
+    repository = QdrantVectorRepository(qdrant)
+    async with postgres.session() as session:
+        await reconcile_orphaned_vectors(
+            session=session, vectors=repository, audit=SqlAlchemyAuditLog(session)
+        )
+        await reconcile_orphaned_images(
+            session=session,
+            objects=objects,
+            audit=SqlAlchemyAuditLog(session),
+            grace_seconds=1,
+            now=datetime.now(UTC) + timedelta(hours=1),
+        )
+
+    assert await repository.get(sample.face_sample_uuid, _provenance()) is None
+    assert await objects.get(digest) is None

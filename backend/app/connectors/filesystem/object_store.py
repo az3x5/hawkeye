@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import logging
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,28 @@ class FilesystemObjectStore:
         """Return the stored bytes, or None if absent."""
         path = self._path_for(digest)
         return await asyncio.to_thread(lambda: path.read_bytes() if path.is_file() else None)
+
+    async def list_digests(self, *, older_than: datetime | None = None) -> list[str]:
+        """Return stored object addresses, optionally only those older than a time.
+
+        The age filter exists for reconciliation: an object written moments ago
+        may belong to a request that has not yet recorded the row naming it, so
+        sweeping recent objects would race live work.
+        """
+
+        def _scan() -> list[str]:
+            found = []
+            for path in self._root.rglob("*"):
+                if not path.is_file() or not _DIGEST_RE.match(path.name):
+                    continue
+                if older_than is not None:
+                    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+                    if modified >= older_than:
+                        continue
+                found.append(path.name)
+            return found
+
+        return await asyncio.to_thread(_scan)
 
     async def delete(self, digest: str) -> bool:
         """Remove the object. Returns whether anything was removed."""

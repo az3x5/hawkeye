@@ -106,3 +106,7 @@ class ObjectStore(Protocol):
     async def delete(self, digest: str) -> bool:
         """Remove the object. Returns whether anything was removed."""
         ...
+
+    async def list_digests(self, *, older_than: datetime | None = None) -> list[str]:
+        """Return stored object addresses, optionally only those older than a time."""
+        ...

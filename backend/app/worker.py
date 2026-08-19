@@ -27,7 +27,7 @@ from app.core.logging import configure_logging
 from app.domain.jobs import EmbeddingJob
 from app.domain.vectors import StoredEmbedding
 from app.retention import purge_expired_query_images
-from app.services.erasure import reconcile_orphaned_vectors
+from app.services.erasure import reconcile_orphaned_images, reconcile_orphaned_vectors
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +131,16 @@ class EmbeddingWorker:
                 )
         except Exception:  # noqa: BLE001 - logged; the sweep retries next hour
             logger.exception("orphaned vector reconciliation failed")
+
+        try:
+            async with self._postgres.session() as session:
+                await reconcile_orphaned_images(
+                    session=session,
+                    objects=self._objects,
+                    audit=SqlAlchemyAuditLog(session),
+                )
+        except Exception:  # noqa: BLE001 - logged; the sweep retries next hour
+            logger.exception("orphaned image reconciliation failed")
 
     async def process(self, job: EmbeddingJob) -> None:
         """Handle one job, recording the outcome in both the queue and the database."""
