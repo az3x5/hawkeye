@@ -12,9 +12,11 @@
  */
 
 import { NextResponse } from "next/server";
+import { apiBaseUrl } from "@/lib/config";
 import { readToken } from "@/lib/session";
 
-const BASE_URL = () => process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
+// Address from configuration, per request. No fallback host: a silent
+// default would send biometric traffic somewhere nobody chose.
 
 const READABLE = [
   /^identifications\/[0-9a-f-]{36}\/image$/,
@@ -53,7 +55,7 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
     );
   }
 
-  const upstream = await fetch(`${BASE_URL()}/api/v1/${path}`, {
+  const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}`, {
     method: request.method,
     headers:
       request.method === "POST"

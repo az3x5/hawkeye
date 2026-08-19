@@ -51,48 +51,58 @@ export default async function SignInPage({
           ? "Email or password is incorrect."
           : null;
 
+  const field =
+    "w-full rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm text-ink";
+
   return (
-    <div className="signin">
+    <div className="mx-auto max-w-md space-y-4 py-10">
       <div>
-        <h1>Sign in</h1>
-        <p className="lede" style={{ marginBottom: 0 }}>
+        <h1 className="text-lg font-semibold tracking-tight text-ink">Sign in</h1>
+        <p className="mt-1 text-sm text-ink-muted">
           Decisions you record are attributed to your account in an append-only audit log.
         </p>
       </div>
 
-      {message === null ? null : <p className="notice error">{message}</p>}
+      {message === null ? null : (
+        <p className="rounded-md border-l-2 border-reject bg-reject/10 px-3 py-2 text-sm text-reject">
+          {message}
+        </p>
+      )}
 
-      <form className="review card padded" action={submit}>
-        <label>
+      <form className="panel space-y-3 p-4" action={submit}>
+        <label className="block space-y-1.5 text-sm text-ink-muted">
           Email
           <input
             type="email"
             name="email"
             autoComplete="username"
             placeholder="you@example.com"
+            className={field}
             autoFocus
             required
           />
         </label>
-        <label>
+        <label className="block space-y-1.5 text-sm text-ink-muted">
           Password
           <input
             type="password"
             name="password"
             autoComplete="current-password"
+            className={field}
             required
           />
         </label>
-        <div className="actions">
-          <button type="submit" className="primary">
-            Sign in
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-bg"
+        >
+          Sign in
+        </button>
       </form>
 
-      <p className="notice">
+      <p className="rounded-md border-l-2 border-line-strong bg-surface-raised px-3 py-2 text-sm text-ink-muted">
         Accounts are created by an operator with{" "}
-        <span className="mono">python -m app.users create</span>.
+        <span className="identifier">python -m app.users create</span>.
       </p>
     </div>
   );

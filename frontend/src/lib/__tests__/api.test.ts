@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// The client reads its address from configuration, so the tests must supply one.
+process.env.FACEID_API_URL = "http://api.test:8000";
+
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => ({ value: "faceid_test-token" }) }),
 }));

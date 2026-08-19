@@ -57,6 +57,23 @@ export interface Identity {
   expires_at: string | null;
 }
 
+export interface DependencyStatus {
+  name: string;
+  healthy: boolean;
+  error: string | null;
+}
+
+export interface Readiness {
+  status: "ready" | "not_ready";
+  checks: DependencyStatus[];
+}
+
+export interface Health {
+  status: "ok";
+  service: string;
+  environment: string;
+}
+
 /** The API's structured error envelope. */
 export interface ApiErrorDetail {
   code: string;

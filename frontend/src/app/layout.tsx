@@ -1,42 +1,29 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { fetchIdentity } from "@/lib/api";
+import { Header } from "@/components/shell/header";
+import { Sidebar } from "@/components/shell/sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Face ID review",
-  description: "Review queue for identity proposals awaiting a human decision.",
-  // Biometric review pages have no business in search results.
+  title: "Face ID — Person Intelligence",
+  description: "Face identification, enrolment and review workstation.",
+  // A biometric workstation has no business in search results.
   robots: { index: false, follow: false },
 };
 
-export default async function RootLayout({ children }: { children: ReactNode }) {
-  // Decisions are attributed to whoever is signed in, so a reviewer should
-  // never be in doubt about which identity they are acting under.
-  const identity = await fetchIdentity().catch(() => null);
-
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <header className="masthead">
-          <Link href="/" className="wordmark">
-            Face&nbsp;ID <span>review</span>
-          </Link>
-          {identity === null ? null : (
-            <div className="whoami">
-              <span className="subject">
-                signed in as <strong>{identity.subject}</strong>
-              </span>
-              <form action="/sign-out" method="post">
-                <button type="submit" className="subtle">
-                  Sign out
-                </button>
-              </form>
-            </div>
-          )}
-        </header>
-        <main>{children}</main>
+    <html lang="en" className="dark">
+      <body className="min-h-screen bg-bg text-ink antialiased">
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Header />
+            <main className="mx-auto w-full max-w-[100rem] flex-1 p-4 lg:p-6">
+              {children}
+            </main>
+          </div>
+        </div>
       </body>
     </html>
   );

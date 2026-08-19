@@ -82,41 +82,46 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
 
   return (
     <>
-      <h2>Comparison</h2>
-      <div className="compare">
-        <figure className="face-panel" style={{ margin: 0 }}>
-          <figcaption className="label">Submitted</figcaption>
+      <h2 className="mb-2 text-xs font-semibold tracking-[0.08em] text-ink-faint uppercase">Comparison</h2>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <figure className="m-0 space-y-2">
+          <figcaption className="text-xs font-semibold tracking-[0.08em] text-ink-faint uppercase">Submitted</figcaption>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`/api/v1/identifications/${identification.identification_uuid}/image`}
             alt="The face image submitted for identification"
+            className="aspect-square w-full rounded-md border border-line bg-surface-sunken object-cover"
           />
-          <div className="caption">The image being identified</div>
+          <div className="text-sm text-ink-muted">The image being identified</div>
         </figure>
 
         {candidate === undefined ? (
-          <div className="card empty">
-            <strong>No candidates</strong>
-            The system matched nobody in the gallery.
+          <div className="panel px-6 py-12 text-center">
+            <p className="text-sm font-semibold text-ink">No candidates</p>
+            <p className="mt-1 text-sm text-ink-muted">
+              The system matched nobody in the gallery.
+            </p>
           </div>
         ) : (
-          <figure className="face-panel" style={{ margin: 0 }}>
-            <figcaption className="label">
+          <figure className="m-0 space-y-2">
+            <figcaption className="text-xs font-semibold tracking-[0.08em] text-ink-faint uppercase">
               {selected === 0 ? "Best match" : `Candidate ${selected + 1}`}
             </figcaption>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`/api/v1/face-samples/${candidate.face_sample_uuid}/image`}
               alt={`Enrolled sample for person ${shortId(candidate.person_uuid)}`}
+              className="aspect-square w-full rounded-md border border-line bg-surface-sunken object-cover"
             />
-            <div className="caption">
-              person <strong className="mono">{shortId(candidate.person_uuid)}</strong> ·{" "}
+            <div className="text-sm text-ink-muted">
+              person <span className="identifier">{shortId(candidate.person_uuid)}</span> ·{" "}
               {candidate.sample_count} sample{candidate.sample_count === 1 ? "" : "s"} on file
             </div>
             <ScoreScale score={candidate.score} thresholds={thresholds} />
-            <div className="caption">
-              similarity <strong>{formatScore(candidate.score)}</strong> under policy{" "}
-              <span className="mono">{thresholds.policy_version}</span>
+            <div className="text-sm text-ink-muted">
+              similarity{" "}
+              <span className="font-semibold text-ink">{formatScore(candidate.score)}</span>{" "}
+              under policy <span className="identifier">{thresholds.policy_version}</span>
             </div>
           </figure>
         )}
@@ -124,28 +129,35 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
 
       {candidates.length > 1 ? (
         <>
-          <h2>
-            Other candidates <kbd>←</kbd> <kbd>→</kbd>
+          <h2 className="mt-6 mb-2 text-xs font-semibold tracking-[0.08em] text-ink-faint uppercase">
+            Other candidates <kbd className="ml-1 rounded bg-surface-raised px-1 py-0.5">←</kbd>{" "}
+            <kbd className="rounded bg-surface-raised px-1 py-0.5">→</kbd>
           </h2>
-          <div className="strip">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             {candidates.map((entry, index) => (
               <button
                 key={entry.face_sample_uuid}
                 type="button"
                 aria-pressed={index === selected}
                 onClick={() => setSelected(index)}
+                className={`shrink-0 space-y-1 rounded-md border p-1.5 ${
+                  index === selected ? "border-accent" : "border-line hover:border-line-strong"
+                }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`/api/v1/face-samples/${entry.face_sample_uuid}/image`}
                   alt={`Candidate ${index + 1}, person ${shortId(entry.person_uuid)}`}
+                  className="size-16 rounded border border-line object-cover"
                 />
-                <span className="strip-score">{formatScore(entry.score)}</span>
+                <span className="block text-center text-xs text-ink-muted tabular-nums">
+                  {formatScore(entry.score)}
+                </span>
               </button>
             ))}
           </div>
           {isNarrowMargin(margin) ? (
-            <p className="notice warn" style={{ marginTop: "0.75rem" }}>
+            <p className="mt-3 rounded-md border-l-2 border-review bg-review/10 px-3 py-2 text-sm text-review">
               The top two candidates are {formatMargin(margin)} apart. Compare them both before
               deciding.
             </p>
@@ -155,16 +167,19 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
 
       {decidable ? (
         <>
-          <h2>Your decision</h2>
+          <h2 className="mt-6 mb-2 text-xs font-semibold tracking-[0.08em] text-ink-faint uppercase">
+            Your decision
+          </h2>
           <form
-            className="review card padded"
+            className="panel max-w-2xl space-y-3 p-4"
             onSubmit={(event) => {
               event.preventDefault();
             }}
           >
-            <label>
+            <label className="block space-y-1.5 text-sm text-ink-muted">
               Note (optional)
               <textarea
+                className="min-h-20 w-full rounded-md border border-line bg-surface-sunken p-2 text-sm text-ink"
                 name="note"
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
@@ -173,27 +188,31 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
               />
             </label>
 
-            {error === null ? null : <p className="notice error">{error}</p>}
+            {error === null ? null : (
+              <p className="rounded-md border-l-2 border-reject bg-reject/10 px-3 py-2 text-sm text-reject">
+                {error}
+              </p>
+            )}
 
-            <div className="actions">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="primary"
+                className="rounded-md bg-accept px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
                 disabled={submitting}
                 onClick={() => void submit("confirmed")}
               >
-                Confirm match <kbd>C</kbd>
+                Confirm match <kbd className="ml-1.5 opacity-70">C</kbd>
               </button>
               <button
                 type="button"
-                className="danger"
+                className="rounded-md bg-reject px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
                 disabled={submitting}
                 onClick={() => void submit("rejected")}
               >
-                Reject match <kbd>R</kbd>
+                Reject match <kbd className="ml-1.5 opacity-70">R</kbd>
               </button>
             </div>
-            <p className="notice">
+            <p className="rounded-md border-l-2 border-line-strong bg-surface-raised px-3 py-2 text-sm text-ink-muted">
               Recorded against the identity you signed in with, in an append-only audit log, and
               cannot be changed afterwards.
             </p>

@@ -6,7 +6,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-COPY tsconfig.json next.config.ts eslint.config.mjs ./
+# postcss.config.mjs is required at build time: without it Tailwind's plugin
+# never runs and the bundle ships with no utility classes at all.
+COPY tsconfig.json next.config.ts eslint.config.mjs postcss.config.mjs components.json ./
 COPY src ./src
 RUN npm run build
 

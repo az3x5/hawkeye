@@ -5,16 +5,20 @@
  * internal network and is never exposed to the reviewer's browser.
  */
 
+import { apiBaseUrl } from "./config";
 import { readToken } from "./session";
 import type {
   ApiErrorBody,
+  Health,
+  Readiness,
   Identification,
   Identity,
   ReviewOutcome,
   ReviewQueue,
 } from "./types";
 
-const BASE_URL = process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
+// Read per call rather than at import: a module should not refuse to load
+// because configuration is absent, and tests import this without an API.
 
 /** An error carrying the API's structured code, so callers can branch on it. */
 export class ApiError extends Error {
@@ -49,7 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await readToken();
   if (token === null) throw new NotAuthenticatedError();
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
@@ -68,6 +72,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Readiness of the API and its dependencies.
+ *
+ * Needs no credential, and returns null rather than throwing when the API
+ * cannot be reached at all — "unreachable" is a status worth displaying, not
+ * an error that should blank the page.
+ */
+export async function fetchReadiness(): Promise<Readiness | null> {
+  try {
+    const response = await fetch(`${apiBaseUrl()}/api/v1/readyz`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    // 503 is a real answer: it carries which dependency is failing.
+    if (response.status !== 200 && response.status !== 503) return null;
+    return (await response.json()) as Readiness;
+  } catch {
+    return null;
+  }
+}
+
+/** Liveness of the API process. */
+export async function fetchHealth(): Promise<Health | null> {
+  try {
+    const response = await fetch(`${apiBaseUrl()}/api/v1/health`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    return response.ok ? ((await response.json()) as Health) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Who the signed-in reviewer is. */
@@ -107,7 +145,7 @@ export async function signIn(
   email: string,
   password: string,
 ): Promise<{ token: string; subject: string }> {
-  const response = await fetch(`${BASE_URL}/api/v1/sessions`, {
+  const response = await fetch(`${apiBaseUrl()}/api/v1/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ email, password }),
@@ -126,7 +164,7 @@ export async function signIn(
 export async function signOut(): Promise<void> {
   const token = await readToken();
   if (token === null) return;
-  await fetch(`${BASE_URL}/api/v1/sessions/current`, {
+  await fetch(`${apiBaseUrl()}/api/v1/sessions/current`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
