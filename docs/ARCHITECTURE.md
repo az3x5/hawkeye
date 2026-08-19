@@ -373,12 +373,29 @@ all. The proxy is a route handler rather than a `rewrites()` rule because a
 rewrite destination is baked in at build time and cannot follow an environment
 variable set at deploy time.
 
+**The layout follows the task.** Reviewing means comparing two faces, so the
+query and the selected candidate sit side by side at the same size, with the
+candidate strip, score scale and decision buttons arranged around that
+comparison rather than stacked above and below it.
+
 **Scores are rendered literally.** `formatScore` prints the cosine similarity
 to four decimals and never a percentage: a percentage reads as a probability,
 and these are not probabilities. Negative similarities display as negative. The
-margin to the runner-up is shown, and flagged when narrow, but the UI never
-changes the proposal on that basis — it is information for the reviewer, not a
-second decision layer.
+score scale draws where a similarity falls between the policy's own thresholds,
+which spares a reviewer holding three numbers in their head; it is a coordinate
+for drawing, labelled with the thresholds themselves, and the raw number is
+always printed beside it. The margin to the runner-up is shown, and flagged
+when narrow, but the UI never changes the proposal on that basis — it is
+information for the reviewer, not a second decision layer.
+
+**Someone working a backlog should not have to reach for the mouse.** `C`
+confirms, `R` rejects, and the arrow keys move between candidates; the handler
+ignores keystrokes aimed at a text field.
+
+**The signed-in identity is always visible**, because decisions are attributed
+to it and a reviewer should never be in doubt about which identity they are
+acting under. `/api/v1/me` exists for that, and requires no scope: any valid
+credential may ask who it is.
 
 **Reviews are attributed and final.** The form requires the reviewer's identity
 because the decision is written to the audit log, and it says plainly that the

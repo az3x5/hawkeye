@@ -30,12 +30,14 @@ export default async function SignInPage({
   }
 
   return (
-    <>
-      <h1>Sign in</h1>
-      <p className="lede">
-        Your review token identifies you in the audit log. Every decision you record is
-        attributed to it and cannot be changed afterwards.
-      </p>
+    <div className="signin">
+      <div>
+        <h1>Sign in</h1>
+        <p className="lede" style={{ marginBottom: 0 }}>
+          Your token identifies you in the audit log. Every decision you record is attributed to
+          it and cannot be changed afterwards.
+        </p>
+      </div>
 
       {error === undefined ? null : (
         <p className="notice error">
@@ -43,7 +45,7 @@ export default async function SignInPage({
         </p>
       )}
 
-      <form className="review card" action={signIn}>
+      <form className="review card padded" action={signIn}>
         <label>
           Review token
           <input
@@ -51,6 +53,7 @@ export default async function SignInPage({
             name="token"
             autoComplete="off"
             placeholder="faceid_…"
+            autoFocus
             required
           />
         </label>
@@ -59,11 +62,13 @@ export default async function SignInPage({
             Sign in
           </button>
         </div>
-        <p className="notice">
-          Ask an operator to issue you one. Tokens are shown once when created and are not
-          recoverable.
-        </p>
       </form>
-    </>
+
+      <p className="notice">
+        Ask an operator to issue one with{" "}
+        <span className="mono">python -m app.tokens issue</span>. Tokens are shown once when
+        created and are not recoverable.
+      </p>
+    </div>
   );
 }

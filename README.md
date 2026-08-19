@@ -201,6 +201,7 @@ No credential is defaulted in code and `.env` is git-ignored.
 | --- | --- | --- |
 | GET | `/api/v1/health` | Liveness. Performs no I/O. |
 | GET | `/api/v1/readyz` | Runs every registered dependency probe; 503 if any fails. |
+| GET | `/api/v1/me` | Who the presented credential belongs to. Any valid token. |
 | POST | `/api/v1/enrolments` | Enrol a face sample. Idempotent; 202 on both first and repeat submissions. |
 | GET | `/api/v1/face-samples/{uuid}` | Read a sample's processing state. |
 | POST | `/api/v1/identifications` | Propose who a face belongs to. Audited. |

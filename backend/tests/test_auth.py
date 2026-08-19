@@ -246,3 +246,47 @@ def _principal_from(
         )
 
     return override
+
+
+class TestIdentityEndpoint:
+    """`/me` — who the presented credential belongs to."""
+
+    @pytest.fixture
+    def client(self, tokens: dict[str, ApiToken]) -> Iterator[TestClient]:
+        from app.api.v1.me import router as me_router
+
+        app = FastAPI()
+        install_error_handlers(app)
+        app.include_router(me_router, prefix="/api/v1")
+        app.dependency_overrides[get_principal] = _principal_from(tokens)
+        with TestClient(app) as test_client:
+            yield test_client
+
+    @pytest.fixture
+    def tokens(self) -> dict[str, ApiToken]:
+        return {}
+
+    def test_reports_the_caller(self, client: TestClient, tokens: dict[str, ApiToken]) -> None:
+        tokens["good"] = _token("alice@example.com", "user", {Scope.REVIEW})
+        body = client.get("/api/v1/me", headers={"Authorization": "Bearer good"}).json()
+        assert body["subject"] == "alice@example.com"
+        assert body["kind"] == "user"
+        assert body["scopes"] == ["review"]
+
+    def test_requires_a_credential_but_no_scope(
+        self, client: TestClient, tokens: dict[str, ApiToken]
+    ) -> None:
+        assert client.get("/api/v1/me").status_code == 401
+        tokens["scopeless"] = _token("svc", "service", set())
+        assert (
+            client.get("/api/v1/me", headers={"Authorization": "Bearer scopeless"}).status_code
+            == 200
+        )
+
+    def test_never_returns_the_secret(
+        self, client: TestClient, tokens: dict[str, ApiToken]
+    ) -> None:
+        tokens["good"] = _token("alice", "user", {Scope.REVIEW})
+        response = client.get("/api/v1/me", headers={"Authorization": "Bearer good"})
+        assert "good" not in response.text
+        assert "token_sha256" not in response.text

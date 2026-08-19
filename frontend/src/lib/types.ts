@@ -49,6 +49,14 @@ export interface ReviewQueue {
   count: number;
 }
 
+export interface Identity {
+  subject: string;
+  kind: string;
+  scopes: string[];
+  token_uuid: string;
+  expires_at: string | null;
+}
+
 /** The API's structured error envelope. */
 export interface ApiErrorDetail {
   code: string;

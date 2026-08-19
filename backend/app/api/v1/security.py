@@ -60,6 +60,7 @@ async def get_principal(
         subject=token.subject,
         kind=token.kind,
         scopes=token.scopes,
+        expires_at=token.expires_at,
     )
 
 

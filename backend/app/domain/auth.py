@@ -56,6 +56,7 @@ class Principal:
     subject: str
     kind: str
     scopes: frozenset[Scope]
+    expires_at: datetime | None = None
 
     def __post_init__(self) -> None:
         """Validate the principal's identity and kind."""

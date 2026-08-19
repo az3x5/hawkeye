@@ -6,7 +6,13 @@
  */
 
 import { readToken } from "./session";
-import type { ApiErrorBody, Identification, ReviewOutcome, ReviewQueue } from "./types";
+import type {
+  ApiErrorBody,
+  Identification,
+  Identity,
+  ReviewOutcome,
+  ReviewQueue,
+} from "./types";
 
 const BASE_URL = process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
 
@@ -62,6 +68,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+/** Who the signed-in reviewer is. */
+export function fetchIdentity(): Promise<Identity> {
+  return request<Identity>("/api/v1/me");
 }
 
 /** Proposals waiting for a human, oldest first. */
