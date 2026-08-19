@@ -8,9 +8,12 @@
 import { apiBaseUrl } from "./config";
 import { readToken } from "./session";
 import type {
+  Account,
   ApiErrorBody,
   Health,
+  IssuedToken,
   Readiness,
+  TokenRecord,
   Identification,
   Identity,
   ReviewOutcome,
@@ -71,6 +74,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -200,4 +204,79 @@ export async function submitIdentification(image: File): Promise<Identification>
     throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
   }
   return (await response.json()) as Identification;
+}
+
+// ---------------------------------------------------------------------------
+// Account and credential administration
+// ---------------------------------------------------------------------------
+
+/** Every password account. Requires the `admin` scope. */
+export function fetchAccounts(): Promise<Account[]> {
+  return request<Account[]>("/api/v1/accounts");
+}
+
+/** Create a password account. Requires the `admin` scope. */
+export function createAccount(body: {
+  email: string;
+  password: string;
+  scopes: string[];
+}): Promise<Account> {
+  return request<Account>("/api/v1/accounts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Set somebody else's password. Requires the `admin` scope. */
+export function setAccountPassword(userUuid: string, password: string): Promise<Account> {
+  return request<Account>(`/api/v1/accounts/${userUuid}/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+}
+
+/** Suspend or restore an account. Requires the `admin` scope. */
+export function setAccountDisabled(userUuid: string, disabled: boolean): Promise<Account> {
+  return request<Account>(`/api/v1/accounts/${userUuid}/${disabled ? "disable" : "enable"}`, {
+    method: "POST",
+  });
+}
+
+/** Change your own password. Every session, including this one, is revoked. */
+export async function changeOwnPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await request<void>("/api/v1/me/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+/** Every issued credential. Secrets are not recoverable, only metadata. */
+export function fetchTokens(): Promise<TokenRecord[]> {
+  return request<TokenRecord[]>("/api/v1/tokens");
+}
+
+/** Issue a credential. The secret comes back once and is never stored. */
+export function issueToken(body: {
+  subject: string;
+  kind: string;
+  scopes: string[];
+  expires_in_days?: number | null;
+  never_expires?: boolean;
+}): Promise<IssuedToken> {
+  return request<IssuedToken>("/api/v1/tokens", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Revoke a credential. Takes effect on its next request. */
+export async function revokeToken(tokenUuid: string): Promise<void> {
+  await request<void>(`/api/v1/tokens/${tokenUuid}`, { method: "DELETE" });
 }

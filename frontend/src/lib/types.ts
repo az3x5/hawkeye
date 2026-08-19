@@ -74,6 +74,35 @@ export interface Health {
   environment: string;
 }
 
+export interface Account {
+  user_uuid: string;
+  email: string;
+  scopes: string[];
+  active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface TokenRecord {
+  token_uuid: string;
+  subject: string;
+  kind: string;
+  scopes: string[];
+  active: boolean;
+  expired: boolean;
+  created_at: string;
+  expires_at: string | null;
+}
+
+/** A newly issued credential. The secret is present only in this response. */
+export interface IssuedToken extends TokenRecord {
+  token: string;
+}
+
+/** The scopes the API recognises. */
+export const SCOPES = ["enrol", "identify", "review", "admin"] as const;
+export type Scope = (typeof SCOPES)[number];
+
 /** The API's structured error envelope. */
 export interface ApiErrorDetail {
   code: string;

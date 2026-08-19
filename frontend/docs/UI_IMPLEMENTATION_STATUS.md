@@ -155,6 +155,54 @@ Submit a face and see the proposal, its evidence and the policy behind it.
   scope. An account holding `identify` alone will see the decision and scores
   but not the candidate thumbnails.
 
+## UI-03 Settings — ✅ COMPLETE
+
+Your own account, and — with the `admin` scope — everybody else's.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Identity, scopes, session expiry | `src/app/settings/page.tsx` |
+| Change your own password | `src/app/settings/password-form.tsx` |
+| Account administration: list, create, disable, enable | `src/app/settings/accounts-panel.tsx` |
+| Credential administration: list, issue, revoke | `src/app/settings/tokens-panel.tsx` |
+| Scope picker explaining what each grant permits | `src/app/settings/scope-picker.tsx` |
+| Server actions for every write | `src/app/settings/actions.ts` |
+| Typed client for accounts and tokens | `src/lib/api.ts` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Your identity, scopes and session expiry are shown | browser | ✅ real values from `/me` |
+| Accounts list real data | browser and API | ✅ 15 rows including `reviewer@admin.com` |
+| Creating an account works | browser | ✅ "Created ui03-user@example.com", appears in the table |
+| Issuing a credential works | browser | ✅ banner, secret shown once, copy offered |
+| The issued credential is real | API listing | ✅ `ui03-check`, scope `identify`, active |
+| Secrets never appear in a listing | API listing | ✅ no `token` field on any row |
+| Revoking works and the row updates | browser | ✅ "Credential revoked.", state `revoked`, button disabled |
+| Disabling your own account is not offered | browser | ✅ button disabled with an explanation |
+| A password mismatch is caught before submission | browser | ✅ "The new passwords do not match" |
+| A mismatch changes nothing | API sign-in afterwards | ✅ 201, old password still valid |
+| Administration is hidden without `admin` | reviewer session | ✅ states the scope is needed |
+| Every administrative action is audited | database | ✅ `account_created`, `token_issued`, `token_revoked` as `admin@admin.com` |
+| Build, lint, types, tests | run | ✅ 54 tests pass |
+
+### Notes
+
+- Every write is a **server action**, so passwords and secrets travel from the
+  form to the API without passing through the browser proxy or client-side
+  fetch code.
+- The issued secret lives in component state for exactly as long as the page
+  does. Only its hash is stored server-side, so that is genuinely the only
+  chance to copy it — the panel says so rather than implying it can be
+  retrieved later.
+- Administration data is fetched **only when the caller holds `admin`**, so a
+  reviewer's settings page is not a wall of 403s.
+- The self-disable guard mirrors a rule the API already enforces. Disabling it
+  in the UI avoids inviting a mistake the server would reject anyway.
+
 ## Later phases
 
 Sequenced by backend readiness rather than by preference.
@@ -163,7 +211,7 @@ Sequenced by backend readiness rather than by preference.
 | --- | --- | --- |
 | UI-01 | Review workspace: queue filters, keyboard triage across items | ✅ COMPLETE |
 | UI-02 | Identify screen: submit an image, show the decision and candidates | ✅ COMPLETE |
-| UI-03 | Settings: account, password change, credential administration | ⬜ NOT STARTED — backend ready |
+| UI-03 | Settings: account, password change, credential administration | ✅ COMPLETE |
 | UI-04 | Enrollments: submit and track a sample | ⬜ NOT STARTED — partial; needs a sample list endpoint for the register |
 | UI-05 | Matches: identification history | 🚫 BLOCKED — needs a history endpoint beyond the review queue |
 | UI-06 | Persons: browse people and their samples | 🚫 BLOCKED — needs person list and read endpoints |
