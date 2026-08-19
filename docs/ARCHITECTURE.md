@@ -536,3 +536,39 @@ than the grace period are left alone.
 All three sweeps run hourly in the worker, and their failures are logged and
 swallowed for the same reason: housekeeping must never stop the worker
 embedding faces.
+
+## 13. Password accounts
+
+Signing in with a password does **not** create a parallel authentication
+system: it mints an ordinary short-lived credential. Everything downstream —
+scopes, the audit log, revocation, rate limiting — keeps working unchanged, and
+there remains exactly one way to authenticate a request.
+
+**Passwords are a different problem from tokens.** A token is 256 bits of
+randomness, so a fast hash is fine. A password is chosen by a person and must
+be assumed guessable, so it is stretched with **Argon2id** and every failure
+path is made indistinguishable from every other:
+
+- unknown email, wrong password and disabled account all raise the same error
+  with the same message;
+- a missing account still performs a verification against a dummy hash, so
+  response *timing* does not reveal which addresses are real;
+- sign-in is rate limited per email address, because attempts against a
+  password have to be bounded in a way attempts against a token do not.
+
+**The plaintext is never stored, never logged, and never accepted as a
+command-line argument** — argv is visible to every process on the host and
+lands in shell history. `python -m app.users` reads it from a prompt, or from
+stdin when that is not a terminal so scripted setup stays possible.
+
+**Password policy is length, not composition.** Composition rules push people
+towards predictable substitutions; the check is a twelve-character minimum plus
+a refusal to reuse the email address.
+
+**Changing a password ends the sessions it produced.** Session credentials
+carry the `user_uuid` that minted them precisely so this is possible: the point
+of changing a password is that the old one stops granting access, including
+through sessions already issued. Disabling an account does the same.
+
+**Signing out revokes server-side.** Dropping the cookie alone would leave a
+working credential in existence.

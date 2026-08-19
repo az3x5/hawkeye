@@ -680,3 +680,63 @@ not, so a crash mid-erase could leave a face on disk attached to nobody.
 - No per-person access control; no merge/split; thresholds unvalidated; model
   weight provenance unresolved.
 - Integration tests share the development database, leaving rows behind.
+
+## Phase 12 — Password accounts — ✅ COMPLETE
+
+Requested explicitly, after I recommended tokens and the preference was
+repeated. Password login mints an ordinary session credential rather than
+introducing a second way to authenticate.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Accounts, Argon2id hashing, policy, constant-cost failure | `backend/app/domain/users.py` |
+| Account storage | `backend/app/connectors/postgres/users.py` |
+| Sign-in service, session minting, password change | `backend/app/services/authentication.py` |
+| `POST /sessions`, `DELETE /sessions/current` | `backend/app/api/v1/sessions.py` |
+| Account administration CLI | `backend/app/users.py` |
+| Session-bound credentials (`api_tokens.user_uuid`) | `backend/app/domain/auth.py` |
+| Email + password sign-in, revoking sign-out | `frontend/src/app/{sign-in,sign-out}` |
+| Schema invariant tests | `backend/tests/test_schema_invariants.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| A correct password mints a working credential | live sign-in then `/me` | ✅ 201 then 200 |
+| The credential carries the account's scopes | live | ✅ admin, enrol, identify, review |
+| Wrong password is refused | live | ✅ 401 `sign_in_failed` |
+| Unknown email is indistinguishable | live, same code and message | ✅ |
+| A missing account still costs a verification | timing test | ✅ no fast path |
+| Repeated failures are throttled | integration test | ✅ 10 × 401 then 429 |
+| Disabled accounts cannot sign in | integration test | ✅ |
+| The plaintext is never stored | table inspection | ✅ Argon2 hash only |
+| The password is never echoed in a response | endpoint test | ✅ |
+| Two accounts sharing a password do not look alike | distinct salts | ✅ |
+| Signing out revokes server-side | live | ✅ 200 then 401 |
+| Changing a password ends existing sessions | live | ✅ 3 revoked, old token 401, new login 201 |
+| Sign-in through the browser | real browser | ✅ signed in as admin@admin.com |
+| Lint, types and tests clean | ruff, mypy --strict, pytest, tsc, eslint, vitest | ✅ 478 backend, 28 frontend |
+
+### A defect this phase exposed
+
+Autogenerating the migration revealed that **my Phase 9 fix had only ever been
+half-applied**. The edit removing `identifications.best_person_uuid`'s foreign
+key never matched, so the constraint was dropped from the database by a
+hand-written migration while the model kept declaring it. Every behavioural
+test passed, because they all ran against the already-migrated database — and
+this phase's autogenerate duly proposed re-creating the constraint, briefly
+restoring the 500 it had caused.
+
+Corrected: the model no longer declares it, the migration is amended, the
+database reconciled, and `alembic check` reports no drift.
+`tests/test_schema_invariants.py` now asserts on the table *definitions*, which
+is the check that was missing.
+
+### Known gaps after Phase 12
+
+- No password reset flow, no MFA, no session listing for a user.
+- Integration tests still share the development database.
+- No per-person access control; no merge/split; thresholds unvalidated; model
+  weight provenance unresolved.

@@ -130,12 +130,12 @@ identifications = Table(
     Column("policy_version", String(128), nullable=False),
     Column("accept_at", Float, nullable=False),
     Column("review_at", Float, nullable=False),
-    Column(
-        "best_person_uuid",
-        PgUUID(as_uuid=True),
-        ForeignKey("persons.person_uuid", ondelete="SET NULL"),
-        nullable=True,
-    ),
+    # Deliberately no foreign key, for the same reason audit_events has none:
+    # an identification is a historical record of a decision and must survive
+    # the deletion of the person it named. The constraint also turned a
+    # candidate the vector store still held, but the metadata store had
+    # forgotten, into a 500 at identification time.
+    Column("best_person_uuid", PgUUID(as_uuid=True), nullable=True),
     Column("best_score", Float, nullable=True),
     Column("candidates", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
@@ -190,9 +190,32 @@ api_tokens = Table(
     Column("scopes", ARRAY(String(32)), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("disabled_at", DateTime(timezone=True), nullable=True),
+    # Set when the credential was minted by a password login, so a password
+    # change can revoke every session it produced.
+    Column("user_uuid", PgUUID(as_uuid=True), nullable=True),
     # NULL means the credential never expires: permitted, but rare by design.
     Column("expires_at", DateTime(timezone=True), nullable=True),
     CheckConstraint("kind IN ('user', 'service')", name="ck_api_token_kind"),
     Index("ix_api_tokens_subject", "subject"),
     comment="API credentials. Secrets are never stored, only their SHA-256.",
+)
+
+
+users = Table(
+    "users",
+    metadata,
+    Column("user_uuid", PgUUID(as_uuid=True), primary_key=True),
+    # Stored already normalised (lowercased), so the unique constraint means
+    # what people expect it to mean.
+    Column("email", String(320), nullable=False, unique=True),
+    # Argon2id. The plaintext is never stored.
+    Column("password_hash", String(255), nullable=False),
+    Column("scopes", ARRAY(String(32)), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column(
+        "password_changed_at", DateTime(timezone=True), nullable=False, server_default=text("now()")
+    ),
+    Column("disabled_at", DateTime(timezone=True), nullable=True),
+    Column("last_login_at", DateTime(timezone=True), nullable=True),
+    comment="Password accounts. Signing in mints a short-lived api_tokens row.",
 )

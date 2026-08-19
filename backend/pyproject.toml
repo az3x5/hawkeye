@@ -21,6 +21,8 @@ dependencies = [
     "qdrant-client>=1.12",
     "redis>=5.0",
     "python-multipart>=0.0.9",
+    "argon2-cffi>=23.1",
+    "email-validator>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +51,8 @@ ignore = ["D203", "D213", "ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
 # Test names are the documentation; classes only group them.
-"tests/*" = ["S101", "D101", "D102", "D103", "D107", "ANN001", "SLF001"]
+# S105/S106: test fixtures need literal passwords; the rule still guards app/.
+"tests/*" = ["S101", "S105", "S106", "D101", "D102", "D103", "D107", "ANN001", "SLF001"]
 # Alembic owns the shape of generated revisions: its template's imports,
 # typing style and long generated literals are not ours to restyle.
 "migrations/versions/*" = ["D", "ANN", "UP", "I", "E501"]

@@ -1,16 +1,16 @@
-import { redirect } from "next/navigation";
-import { cookieOptions, SESSION_COOKIE } from "@/lib/session";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { ApiError, signIn } from "@/lib/api";
+import { SESSION_COOKIE, cookieOptions } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Sign-in.
  *
- * Tokens are issued out of band by an operator (`python -m app.tokens issue`)
- * and pasted here. There is deliberately no self-service registration: an
- * application that can mint its own credentials can escalate its own
- * privileges.
+ * The password is exchanged for a short-lived session credential server-side;
+ * the credential is kept in an httpOnly cookie and the password itself never
+ * reaches the browser's storage or this app's logs.
  */
 export default async function SignInPage({
   searchParams,
@@ -19,41 +19,67 @@ export default async function SignInPage({
 }) {
   const { error } = await searchParams;
 
-  async function signIn(formData: FormData) {
+  async function submit(formData: FormData) {
     "use server";
-    const token = String(formData.get("token") ?? "").trim();
-    if (token === "") redirect("/sign-in?error=empty");
+    const email = String(formData.get("email") ?? "").trim();
+    const password = String(formData.get("password") ?? "");
+    if (email === "" || password === "") redirect("/sign-in?error=missing");
+
+    let token: string;
+    try {
+      ({ token } = await signIn(email, password));
+    } catch (caught) {
+      // Deliberately one message for every failure: which half was wrong is
+      // not something an unauthenticated caller has earned.
+      if (caught instanceof ApiError && caught.status === 429) {
+        redirect("/sign-in?error=throttled");
+      }
+      redirect("/sign-in?error=rejected");
+    }
 
     const store = await cookies();
     store.set(SESSION_COOKIE, token, cookieOptions(process.env.NODE_ENV === "production"));
     redirect("/");
   }
 
+  const message =
+    error === "missing"
+      ? "Enter your email and password."
+      : error === "throttled"
+        ? "Too many attempts. Wait a minute and try again."
+        : error === "rejected"
+          ? "Email or password is incorrect."
+          : null;
+
   return (
     <div className="signin">
       <div>
         <h1>Sign in</h1>
         <p className="lede" style={{ marginBottom: 0 }}>
-          Your token identifies you in the audit log. Every decision you record is attributed to
-          it and cannot be changed afterwards.
+          Decisions you record are attributed to your account in an append-only audit log.
         </p>
       </div>
 
-      {error === undefined ? null : (
-        <p className="notice error">
-          {error === "empty" ? "Enter your token to continue." : "That token was not accepted."}
-        </p>
-      )}
+      {message === null ? null : <p className="notice error">{message}</p>}
 
-      <form className="review card padded" action={signIn}>
+      <form className="review card padded" action={submit}>
         <label>
-          Review token
+          Email
+          <input
+            type="email"
+            name="email"
+            autoComplete="username"
+            placeholder="you@example.com"
+            autoFocus
+            required
+          />
+        </label>
+        <label>
+          Password
           <input
             type="password"
-            name="token"
-            autoComplete="off"
-            placeholder="faceid_…"
-            autoFocus
+            name="password"
+            autoComplete="current-password"
             required
           />
         </label>
@@ -65,9 +91,8 @@ export default async function SignInPage({
       </form>
 
       <p className="notice">
-        Ask an operator to issue one with{" "}
-        <span className="mono">python -m app.tokens issue</span>. Tokens are shown once when
-        created and are not recoverable.
+        Accounts are created by an operator with{" "}
+        <span className="mono">python -m app.users create</span>.
       </p>
     </div>
   );

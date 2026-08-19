@@ -14,6 +14,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
 from app.api.v1.me import router as me_router
 from app.api.v1.persons import router as person_router
+from app.api.v1.sessions import router as session_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
@@ -115,6 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(identification_router, prefix=settings.api_v1_prefix)
     app.include_router(person_router, prefix=settings.api_v1_prefix)
     app.include_router(me_router, prefix=settings.api_v1_prefix)
+    app.include_router(session_router, prefix=settings.api_v1_prefix)
     return app
 
 

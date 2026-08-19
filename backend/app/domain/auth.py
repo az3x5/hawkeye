@@ -102,6 +102,8 @@ class ApiToken:
     created_at: datetime
     disabled_at: datetime | None = None
     expires_at: datetime | None = None
+    #: Set when this credential was minted by a password login.
+    user_uuid: UUID | None = None
 
     def expired(self, *, now: datetime | None = None) -> bool:
         """Whether the credential's lifetime has run out."""
@@ -140,6 +142,8 @@ def new_token(
     scopes: Sequence[Scope],
     *,
     lifetime_days: int | None,
+    lifetime_seconds: int | None = None,
+    user_uuid: UUID | None = None,
 ) -> tuple[ApiToken, str]:
     """Create a credential, returning the record and the one-time secret.
 
@@ -148,6 +152,8 @@ def new_token(
     """
     if lifetime_days is not None and lifetime_days < 1:
         raise ValueError(f"lifetime_days must be at least 1, got {lifetime_days}")
+    if lifetime_seconds is not None and lifetime_seconds < 1:
+        raise ValueError(f"lifetime_seconds must be at least 1, got {lifetime_seconds}")
 
     issued = datetime.now(UTC)
     secret = generate_token()
@@ -158,9 +164,20 @@ def new_token(
         token_sha256=hash_token(secret),
         scopes=frozenset(scopes),
         created_at=issued,
-        expires_at=None if lifetime_days is None else issued + timedelta(days=lifetime_days),
+        expires_at=_expiry(issued, lifetime_days, lifetime_seconds),
+        user_uuid=user_uuid,
     )
     return record, secret
+
+
+def _expiry(
+    issued: datetime, lifetime_days: int | None, lifetime_seconds: int | None
+) -> datetime | None:
+    if lifetime_seconds is not None:
+        return issued + timedelta(seconds=lifetime_seconds)
+    if lifetime_days is not None:
+        return issued + timedelta(days=lifetime_days)
+    return None
 
 
 @runtime_checkable

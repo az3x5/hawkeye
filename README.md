@@ -227,8 +227,26 @@ Interactive docs are served at `/docs` in the `local` environment only.
 
 ## Authentication
 
-Every endpoint except `/health` and `/readyz` requires a bearer token with the
-right scope. Tokens are issued out of band — there is no self-service
+Every endpoint except `/health`, `/readyz` and `/sessions` requires a bearer
+token with the right scope. There are two ways to get one.
+
+**People sign in with an email and password.** Accounts are created by an
+operator; the password is read from a prompt or stdin, never from argv:
+
+```bash
+docker compose exec -T api python -m app.users create --email you@example.com --scope review
+```
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/sessions -H 'Content-Type: application/json' -d '{"email":"you@example.com","password":"..."}'
+```
+
+That returns a short-lived scoped credential — the same kind of credential as
+below, so scopes, auditing and revocation behave identically. The web UI does
+this for you and keeps the result in an httpOnly cookie. Changing a password or
+disabling an account revokes every session it produced.
+
+**Services use issued tokens**, out of band — there is no self-service
 registration, because an API that can mint its own credentials can escalate its
 own privileges:
 

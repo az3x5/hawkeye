@@ -18,11 +18,14 @@ from app.connectors.postgres import (
     SqlAlchemyPersonRepository,
 )
 from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
+from app.connectors.postgres.tokens import SqlAlchemyTokenStore
+from app.connectors.postgres.users import SqlAlchemyUserStore
 from app.connectors.qdrant import QdrantVectorRepository
 from app.connectors.redis import RedisJobQueue
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
+from app.services.authentication import AuthenticationService
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
@@ -99,6 +102,19 @@ def get_object_store(request: Request) -> FilesystemObjectStore:
     if not isinstance(objects, FilesystemObjectStore):
         raise ServiceUnavailableError("the object store is not available")
     return objects
+
+
+async def get_authentication_service(
+    request: Request,
+) -> AsyncIterator[AuthenticationService]:
+    """Build the sign-in service bound to one database transaction."""
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        yield AuthenticationService(
+            users=SqlAlchemyUserStore(session),
+            tokens=SqlAlchemyTokenStore(session),
+            session_lifetime_seconds=settings.session_lifetime_seconds,
+        )
 
 
 async def get_person_eraser(request: Request) -> AsyncIterator[PersonEraser]:

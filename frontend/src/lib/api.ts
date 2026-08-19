@@ -96,3 +96,39 @@ export function submitReview(
     body: JSON.stringify(body),
   });
 }
+
+/**
+ * Exchange an email and password for a session credential.
+ *
+ * Called from the sign-in server action, which is the only place without a
+ * session yet, so it bypasses the usual token-attaching request helper.
+ */
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<{ token: string; subject: string }> {
+  const response = await fetch(`${BASE_URL}/api/v1/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    if (isErrorBody(body)) throw new ApiError(response.status, body.error.code, body.error.message);
+    throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
+  }
+  return (await response.json()) as { token: string; subject: string };
+}
+
+/** Revoke the current session server-side, so signing out really ends it. */
+export async function signOut(): Promise<void> {
+  const token = await readToken();
+  if (token === null) return;
+  await fetch(`${BASE_URL}/api/v1/sessions/current`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  }).catch(() => undefined);
+}

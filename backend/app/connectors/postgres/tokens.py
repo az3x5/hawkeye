@@ -34,6 +34,7 @@ class SqlAlchemyTokenStore:
                 created_at=token.created_at,
                 disabled_at=token.disabled_at,
                 expires_at=token.expires_at,
+                user_uuid=token.user_uuid,
             )
         )
         return token
@@ -58,6 +59,20 @@ class SqlAlchemyTokenStore:
         )
         return cast("CursorResult[Any]", result).rowcount > 0
 
+    async def disable_for_user(self, user_uuid: UUID) -> int:
+        """Revoke every session minted for one account.
+
+        Used when a password changes: the point of changing it is that the old
+        one stops granting access, including through sessions it already
+        produced.
+        """
+        result = await self._session.execute(
+            api_tokens.update()
+            .where(api_tokens.c.user_uuid == user_uuid, api_tokens.c.disabled_at.is_(None))
+            .values(disabled_at=datetime.now(UTC))
+        )
+        return int(cast("CursorResult[Any]", result).rowcount)
+
     async def list_all(self) -> Sequence[ApiToken]:
         """Return every credential, newest first."""
         result = await self._session.execute(
@@ -78,4 +93,5 @@ class SqlAlchemyTokenStore:
             created_at=row.created_at,
             disabled_at=row.disabled_at,
             expires_at=row.expires_at,
+            user_uuid=row.user_uuid,
         )

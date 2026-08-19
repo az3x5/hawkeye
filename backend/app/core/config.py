@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     rate_limit_enrol: int = Field(
         default=120, ge=1, description="Enrolments allowed per credential per window."
     )
+    rate_limit_sign_in: int = Field(
+        default=10,
+        ge=1,
+        description="Sign-in attempts allowed per email per window.",
+    )
+
+    # How long a password sign-in stays valid. Shorter than an issued token,
+    # because a browser session is a different risk from a service credential.
+    session_lifetime_seconds: int = Field(default=12 * 3600, ge=60)
 
     # Credential lifetime applied when issuing a token without an explicit one.
     token_lifetime_days: int = Field(
