@@ -170,3 +170,34 @@ export async function signOut(): Promise<void> {
     cache: "no-store",
   }).catch(() => undefined);
 }
+
+/**
+ * Submit an image for identification.
+ *
+ * Multipart rather than JSON, and sent from the server so the reviewer's
+ * credential never reaches the browser. The image itself is forwarded straight
+ * through and not retained here.
+ */
+export async function submitIdentification(image: File): Promise<Identification> {
+  const token = await readToken();
+  if (token === null) throw new NotAuthenticatedError();
+
+  const body = new FormData();
+  body.append("image", image);
+
+  const response = await fetch(`${apiBaseUrl()}/api/v1/identifications`, {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    body,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    if (isErrorBody(payload)) {
+      throw new ApiError(response.status, payload.error.code, payload.error.message);
+    }
+    throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
+  }
+  return (await response.json()) as Identification;
+}

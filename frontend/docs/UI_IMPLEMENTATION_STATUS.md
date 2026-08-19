@@ -115,6 +115,46 @@ Filtering and ordering for the backlog, and continuous keyboard triage.
 - The cursor is derived during render rather than synced in an effect, which
   ESLint's `set-state-in-effect` rule correctly flagged as a cascading render.
 
+## UI-02 Identify — ✅ COMPLETE
+
+Submit a face and see the proposal, its evidence and the policy behind it.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Upload console: drag-and-drop, preview, submit, clear | `src/app/identify/identify-console.tsx` |
+| Server action carrying the image to the API | `src/app/identify/actions.ts` |
+| Multipart submission from the server | `src/lib/api.ts` (`submitIdentification`) |
+| Scope check before showing the console | `src/app/identify/page.tsx` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| A real image produces a real decision | browser: uploaded an enrolled face | ✅ `accept`, similarity 1.0000, policy `local-dev-v1` |
+| Candidates render with scores and scales | browser | ✅ 3 candidates, each with its own scale |
+| The decision is recorded | database | ✅ row written with outcome and policy |
+| The attempt is audited against the account | database | ✅ `identification_performed` by `admin@admin.com` |
+| A faceless image explains itself | browser: blank canvas image | ✅ "no face was detected in the query image", `identification_failed` |
+| Review outcomes link into the review screen | code path, `outcome === "review"` | ✅ |
+| Scores are never presented as probabilities | copy and rendering | ✅ raw similarities, thresholds labelled |
+| Nothing is written to browser storage | browser | ✅ `localStorage` and `sessionStorage` both empty; session cookie not script-readable |
+| The preview is released, not retained | object URL revoked on change | ✅ |
+| A missing scope is stated, not hidden | `/identify` checks `identify` | ✅ |
+| Build, lint, types, tests | run | ✅ 54 tests pass |
+
+### Notes
+
+- The upload goes through a **server action**, not the browser proxy. The
+  proxy's allowlist stays narrow — image reads and the review write — and the
+  credential never reaches the browser.
+- The preview is a local object URL, derived during render and revoked when it
+  changes. Biometric material should not outlive the tab it was dropped into.
+- Candidate images are fetched through the proxy, which requires the `review`
+  scope. An account holding `identify` alone will see the decision and scores
+  but not the candidate thumbnails.
+
 ## Later phases
 
 Sequenced by backend readiness rather than by preference.
@@ -122,7 +162,7 @@ Sequenced by backend readiness rather than by preference.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | UI-01 | Review workspace: queue filters, keyboard triage across items | ✅ COMPLETE |
-| UI-02 | Identify screen: submit an image, show the decision and candidates | ⬜ NOT STARTED — backend ready |
+| UI-02 | Identify screen: submit an image, show the decision and candidates | ✅ COMPLETE |
 | UI-03 | Settings: account, password change, credential administration | ⬜ NOT STARTED — backend ready |
 | UI-04 | Enrollments: submit and track a sample | ⬜ NOT STARTED — partial; needs a sample list endpoint for the register |
 | UI-05 | Matches: identification history | 🚫 BLOCKED — needs a history endpoint beyond the review queue |
