@@ -74,6 +74,76 @@ export interface Health {
   environment: string;
 }
 
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PersonIdentifier {
+  source: string;
+  kind: string;
+  value: string;
+}
+
+export interface PersonSummary {
+  person_uuid: string;
+  created_at: string;
+  sample_count: number;
+  processed_count: number;
+  identifiers: PersonIdentifier[];
+}
+
+export interface PersonDetail extends PersonSummary {
+  samples: FaceSample[];
+}
+
+export interface IdentificationRecord {
+  identification_uuid: string;
+  outcome: DecisionOutcome;
+  policy_version: string;
+  accept_at: number;
+  review_at: number;
+  best_person_uuid: string | null;
+  best_score: number | null;
+  created_at: string;
+  review_outcome: ReviewOutcome | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  candidates: Candidate[];
+}
+
+export interface AuditEvent {
+  audit_uuid: string;
+  occurred_at: string;
+  action: string;
+  actor_identifier: string;
+  actor_kind: string;
+  person_uuid: string | null;
+  face_sample_uuid: string | null;
+  identification_uuid: string | null;
+  policy_version: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface AuditPage extends Paged<AuditEvent> {
+  actions: string[];
+}
+
+export interface Statistics {
+  persons: number;
+  face_samples: number;
+  samples_by_state: Record<string, number>;
+  embeddings: number;
+  identifications: number;
+  identifications_by_outcome: Record<string, number>;
+  awaiting_review: number;
+  reviews_recorded: number;
+  audit_events: number;
+}
+
 export type ProcessingState = "pending" | "processed" | "failed";
 
 export interface FaceSample {

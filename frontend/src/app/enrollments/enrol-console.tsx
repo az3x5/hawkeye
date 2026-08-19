@@ -81,6 +81,14 @@ export function EnrolConsole({ canSeeImages }: { canSeeImages: boolean }) {
   async function submit(formData: FormData) {
     setBusy(true);
     setError(null);
+
+    // A datetime-local value has no offset. Attach the browser's own, so a
+    // capture time is recorded as the moment it actually happened rather than
+    // being silently read as UTC.
+    const captured = String(formData.get("captured_at") ?? "");
+    if (captured !== "") {
+      formData.set("captured_at", withLocalOffset(captured));
+    }
     const result = await enrolAction(formData);
     setBusy(false);
 
@@ -305,4 +313,15 @@ function TrackedSamples({
       </table>
     </div>
   );
+}
+
+/** Render a `datetime-local` value as an ISO timestamp with this browser's offset. */
+export function withLocalOffset(value: string): string {
+  const local = new Date(value);
+  if (Number.isNaN(local.getTime())) return value;
+
+  const minutes = -local.getTimezoneOffset();
+  const sign = minutes >= 0 ? "+" : "-";
+  const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, "0");
+  return `${value}:00${sign}${pad(minutes / 60)}:${pad(minutes % 60)}`;
 }

@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import pytest_asyncio
 from qdrant_client import models
+from sqlalchemy import text
 
 from app.connectors.postgres import PostgresConnector, SqlAlchemyFaceSampleRepository
 from app.connectors.qdrant import collection_name
@@ -132,6 +133,58 @@ class TestPipeline:
         )
         assert embedding is not None
         assert embedding.dimension == 512
+
+    async def test_embedding_provenance_is_recorded_in_the_metadata_store(
+        self, worker: EmbeddingWorker, postgres: PostgresConnector
+    ) -> None:
+        """The vector lives in Qdrant; this row attributes it to a model.
+
+        Without it, a stored vector cannot be tied to the model and
+        preprocessing that produced it from the metadata store, and a model
+        migration is invisible there.
+        """
+        _, sample = await _enrol(worker, _face_jpeg(), postgres)
+        job = await worker._queue.reserve(timeout_seconds=5)
+        assert job is not None
+        await worker.process(job)
+
+        async with postgres.session() as session:
+            rows = await session.execute(
+                text(
+                    "SELECT model_name, model_version, preprocessing_version, "
+                    "vector_collection, dimension FROM face_embeddings "
+                    "WHERE face_sample_uuid = :u"
+                ),
+                {"u": str(sample.face_sample_uuid)},
+            )
+        recorded = rows.all()
+        assert len(recorded) == 1
+        assert recorded[0].model_name == worker._recognizer.model_name
+        assert recorded[0].model_version == worker._recognizer.model_version
+        assert recorded[0].dimension == 512
+        assert recorded[0].vector_collection.startswith("face_embeddings__")
+
+    async def test_re_embedding_records_no_duplicate(
+        self, worker: EmbeddingWorker, postgres: PostgresConnector
+    ) -> None:
+        person, sample = await _enrol(worker, _face_jpeg(), postgres)
+        job = await worker._queue.reserve(timeout_seconds=5)
+        assert job is not None
+        await worker.process(job)
+        await worker.process(
+            EmbeddingJob(
+                face_sample_uuid=sample.face_sample_uuid,
+                person_uuid=person.person_uuid,
+                image_sha256=sample.image_sha256,
+            )
+        )
+
+        async with postgres.session() as session:
+            rows = await session.execute(
+                text("SELECT COUNT(*) AS n FROM face_embeddings WHERE face_sample_uuid = :u"),
+                {"u": str(sample.face_sample_uuid)},
+            )
+        assert rows.one().n == 1
 
     async def test_the_stored_vector_is_findable_by_search(
         self, worker: EmbeddingWorker, postgres: PostgresConnector

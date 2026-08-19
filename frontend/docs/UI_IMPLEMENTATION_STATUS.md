@@ -246,6 +246,49 @@ itself remains impossible: the API has no endpoint for listing samples.
   holding `enrol` alone tracks samples without thumbnails, and the column is
   omitted rather than showing broken images.
 
+## UI-05 to UI-08 — ✅ COMPLETE
+
+Unblocked by backend Phase 14, which added person, history, audit and
+statistics read endpoints.
+
+### Delivered
+
+| Screen | Location | Backing endpoint |
+| --- | --- | --- |
+| Persons list and detail | `src/app/persons/` | `GET /persons`, `GET /persons/{uuid}` |
+| Matches history | `src/app/matches/` | `GET /identification-history` |
+| Audit log | `src/app/audit/` | `GET /audit-events` |
+| Dashboard counts | `src/app/dashboard/` | `GET /statistics` |
+| Shared search and pagination | `src/components/browse-controls.tsx` | — |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Persons list real people with identifiers | browser | ✅ 15 known, `p14:id=prov-check` shown |
+| A person reads back with samples and history | browser | ✅ "1 embedded of 1", sample `processed` |
+| Matches list every identification | browser | ✅ 5 recorded |
+| Match filters work | browser: Accepted | ✅ 5 → 2, URL carries the filter |
+| Audit lists events with filters | browser | ✅ 25 events, filter to 3 |
+| A system actor stays distinguishable | browser | ✅ both kinds rendered |
+| Dashboard figures match the API exactly | browser against `/statistics` | ✅ 14/14/0/5 at the time of checking |
+| No invented figures | dashboard shows counts only | ✅ says why no rates are shown |
+| Audit needs `admin` | scope check on the page | ✅ states the requirement |
+| `captured_at` sends a real offset | unit tests | ✅ no longer assumes UTC |
+| Build, lint, types, tests | run | ✅ 58 tests pass |
+
+### A gap the dashboard exposed
+
+Showing "Embeddings stored: 0" beside eight processed samples revealed that
+**nothing had ever written the `face_embeddings` table**. It was designed in
+backend Phase 4 to record which sample was embedded under which model and
+preprocessing version, and the architecture document claimed it did, but the
+worker only wrote the vector to Qdrant. Fixed in the worker with two
+regression tests; the figure now reports real rows.
+
+That is the argument for real figures in one line: a fabricated dashboard
+would have shown a plausible number and hidden the defect.
+
 ## Later phases
 
 Sequenced by backend readiness rather than by preference.
@@ -256,10 +299,11 @@ Sequenced by backend readiness rather than by preference.
 | UI-02 | Identify screen: submit an image, show the decision and candidates | ✅ COMPLETE |
 | UI-03 | Settings: account, password change, credential administration | ✅ COMPLETE |
 | UI-04 | Enrollments: submit and track a sample | ✅ COMPLETE — register still blocked on a list endpoint |
-| UI-05 | Matches: identification history | 🚫 BLOCKED — needs a history endpoint beyond the review queue |
-| UI-06 | Persons: browse people and their samples | 🚫 BLOCKED — needs person list and read endpoints |
-| UI-07 | Audit: view the audit log | 🚫 BLOCKED — needs a read endpoint for `audit_events` |
-| UI-08 | Dashboard: operational figures | 🚫 BLOCKED — needs an aggregate metrics endpoint |
+| UI-05 | Matches: identification history | ✅ COMPLETE |
+| UI-06 | Persons: browse people and their samples | ✅ COMPLETE |
+| UI-07 | Audit: view the audit log | ✅ COMPLETE |
+| UI-08 | Dashboard: counts | ✅ COMPLETE — counts only; rates need a time series the system does not keep |
 
-Blocked phases require backend work first. Building them now would mean
-inventing data, which is the one thing this interface must not do.
+Every phase is now built. Backend Phase 14 added the read endpoints the last
+four needed; before that they would have required inventing data, which is the
+one thing this interface must not do.

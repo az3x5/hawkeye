@@ -5,16 +5,23 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import Row, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.connectors.postgres.tables import face_samples, person_external_identifiers, persons
+from app.connectors.postgres.tables import (
+    face_embeddings,
+    face_samples,
+    person_external_identifiers,
+    persons,
+)
 from app.domain.jobs import ProcessingState
 from app.domain.models import ExternalIdentifier, ExternalIdentifierKind, FaceSample, Person
+from app.domain.recognition import EmbeddingProvenance
 from app.domain.repositories import ConflictError
 
 
@@ -208,3 +215,43 @@ class SqlAlchemyFaceSampleRepository:
         )
         row = result.one_or_none()
         return _to_face_sample(row) if row is not None else None
+
+
+class SqlAlchemyEmbeddingMetadataRepository:
+    """Records which sample was embedded, under what provenance, and where.
+
+    The vector itself lives in the vector store; this row is what makes a model
+    migration observable from the metadata store, and what lets a stored vector
+    be attributed to the model and preprocessing that produced it.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Bind the repository to an open session/transaction."""
+        self._session = session
+
+    async def record(
+        self,
+        *,
+        face_sample_uuid: UUID,
+        provenance: EmbeddingProvenance,
+        collection: str,
+        dimension: int,
+    ) -> None:
+        """Record an embedding, or leave the existing row alone.
+
+        Re-embedding the same sample under the same provenance is idempotent:
+        the vector was replaced in place, so there is nothing new to record.
+        """
+        await self._session.execute(
+            insert(face_embeddings)
+            .values(
+                embedding_uuid=uuid4(),
+                face_sample_uuid=face_sample_uuid,
+                model_name=provenance.model_name,
+                model_version=provenance.model_version,
+                preprocessing_version=provenance.preprocessing_version,
+                vector_collection=collection,
+                dimension=dimension,
+            )
+            .on_conflict_do_nothing(constraint="uq_face_embedding_sample_provenance")
+        )

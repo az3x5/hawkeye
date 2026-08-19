@@ -18,9 +18,13 @@ from app.adapters.adaface import EMBEDDING_DIM
 from app.adapters.factory import build_detector, build_recognizer
 from app.adapters.preprocessing import UInt8Array
 from app.connectors.filesystem import FilesystemObjectStore
-from app.connectors.postgres import PostgresConnector, SqlAlchemyFaceSampleRepository
+from app.connectors.postgres import (
+    PostgresConnector,
+    SqlAlchemyEmbeddingMetadataRepository,
+    SqlAlchemyFaceSampleRepository,
+)
 from app.connectors.postgres.audit import SqlAlchemyAuditLog
-from app.connectors.qdrant import QdrantConnector, QdrantVectorRepository
+from app.connectors.qdrant import QdrantConnector, QdrantVectorRepository, collection_name
 from app.connectors.redis import RedisConnector, RedisJobQueue
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -192,6 +196,17 @@ class EmbeddingWorker:
                 embedding=embedding,
             )
         )
+
+        # The vector lives in the vector store; this row is what attributes it
+        # to a model and preprocessing version from the metadata store, and
+        # what makes a model migration observable there.
+        async with self._postgres.session() as session:
+            await SqlAlchemyEmbeddingMetadataRepository(session).record(
+                face_sample_uuid=job.face_sample_uuid,
+                provenance=embedding.provenance,
+                collection=collection_name(embedding.provenance),
+                dimension=embedding.dimension,
+            )
 
     async def _record_failure(self, job: EmbeddingJob, reason: str) -> None:
         async with self._postgres.session() as session:

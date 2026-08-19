@@ -60,8 +60,10 @@ export async function enrolAction(formData: FormData): Promise<EnrolResult> {
       source,
       externalId: externalId || null,
       localId: localId || null,
-      // The API wants an offset; a datetime-local field has none.
-      capturedAt: capturedAt ? `${capturedAt}:00Z` : null,
+      // The browser sends its own offset alongside the local time, because a
+      // datetime-local field carries none and assuming UTC would record the
+      // wrong capture time for everyone outside it.
+      capturedAt: capturedAt || null,
       image,
     });
     return { ok: true, enrolment };

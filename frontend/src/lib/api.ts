@@ -10,11 +10,17 @@ import { readToken } from "./session";
 import type {
   Account,
   ApiErrorBody,
+  AuditPage,
   Enrolment,
   FaceSample,
   Health,
   IssuedToken,
+  IdentificationRecord,
+  Paged,
+  PersonDetail,
+  PersonSummary,
   Readiness,
+  Statistics,
   TokenRecord,
   Identification,
   Identity,
@@ -331,4 +337,58 @@ export async function submitEnrolment(fields: {
 /** One face sample, including how far it has got through the pipeline. */
 export function fetchFaceSample(faceSampleUuid: string): Promise<FaceSample> {
   return request<FaceSample>(`/api/v1/face-samples/${faceSampleUuid}`);
+}
+
+// ---------------------------------------------------------------------------
+// Browsing
+// ---------------------------------------------------------------------------
+
+function query(params: Record<string, string | number | boolean | null | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined && value !== "") search.set(key, String(value));
+  }
+  const rendered = search.toString();
+  return rendered === "" ? "" : `?${rendered}`;
+}
+
+/** People known to the system. Requires `review`. */
+export function fetchPersons(params: {
+  limit?: number;
+  offset?: number;
+  search?: string | null;
+}): Promise<Paged<PersonSummary>> {
+  return request<Paged<PersonSummary>>(`/api/v1/persons${query(params)}`);
+}
+
+/** One person, their identifiers and their samples. Requires `review`. */
+export function fetchPerson(personUuid: string): Promise<PersonDetail> {
+  return request<PersonDetail>(`/api/v1/persons/${personUuid}`);
+}
+
+/** Identification history, decided or not. Requires `review`. */
+export function fetchIdentificationHistory(params: {
+  limit?: number;
+  offset?: number;
+  outcome?: string | null;
+  reviewed?: boolean | null;
+  person_uuid?: string | null;
+}): Promise<Paged<IdentificationRecord>> {
+  return request<Paged<IdentificationRecord>>(`/api/v1/identification-history${query(params)}`);
+}
+
+/** The audit log. Requires `admin`. */
+export function fetchAuditEvents(params: {
+  limit?: number;
+  offset?: number;
+  action?: string | null;
+  actor?: string | null;
+  person_uuid?: string | null;
+}): Promise<AuditPage> {
+  return request<AuditPage>(`/api/v1/audit-events${query(params)}`);
+}
+
+/** Aggregate counts. Requires `review`. */
+export function fetchStatistics(): Promise<Statistics> {
+  return request<Statistics>("/api/v1/statistics");
 }

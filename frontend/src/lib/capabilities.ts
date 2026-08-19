@@ -21,14 +21,15 @@ export interface Capability {
   note: string;
 }
 
-export const CAPABILITIES = {
+
+export const CAPABILITIES: Record<CapabilityKey, Capability> = {
   dashboard: {
-    state: "unavailable",
-    supported: ["GET /health", "GET /readyz"],
-    missing: ["an aggregate metrics or counts endpoint"],
+    state: "partial",
+    supported: ["GET /statistics", "GET /health", "GET /readyz"],
+    missing: ["a time series, for rates and trends rather than totals"],
     note:
-      "The API exposes no counts, rates or totals. Operational figures would " +
-      "have to be invented, so none are shown.",
+      "Counts are real and come from the API. Rates and trends are not shown " +
+      "because the system keeps no history to derive them from.",
   },
   identify: {
     state: "available",
@@ -60,28 +61,26 @@ export const CAPABILITIES = {
     note: "Fully supported and already implemented.",
   },
   persons: {
-    state: "unavailable",
-    supported: ["DELETE /persons/{uuid}"],
-    missing: ["list and read endpoints for people and their samples"],
-    note:
-      "A person can be erased but not listed or read, so there is nothing to " +
-      "browse. Erasure is available through the API.",
+    state: "available",
+    supported: [
+      "GET /persons",
+      "GET /persons/{uuid}",
+      "DELETE /persons/{uuid}",
+    ],
+    missing: [],
+    note: "People can be listed, read and erased.",
   },
   matches: {
-    state: "partial",
-    supported: ["GET /identifications (proposals awaiting review only)"],
-    missing: ["a history endpoint covering accepted and rejected identifications"],
-    note:
-      "Only unreviewed proposals can be listed. Accepted and rejected " +
-      "identifications are recorded but cannot be queried.",
+    state: "available",
+    supported: ["GET /identification-history", "GET /identifications/{uuid}"],
+    missing: [],
+    note: "Every identification can be listed and filtered.",
   },
   audit: {
-    state: "unavailable",
-    supported: [],
-    missing: ["a read endpoint for audit_events"],
-    note:
-      "Every administrative and review action is recorded, but the log is " +
-      "only reachable from the database — nothing exposes it over HTTP.",
+    state: "available",
+    supported: ["GET /audit-events"],
+    missing: [],
+    note: "The append-only log is readable. Nothing can edit or remove an event.",
   },
   settings: {
     state: "available",
@@ -94,6 +93,14 @@ export const CAPABILITIES = {
     missing: [],
     note: "Account and credential administration is supported; scheduled for UI-07.",
   },
-} as const satisfies Record<string, Capability>;
+};
 
-export type CapabilityKey = keyof typeof CAPABILITIES;
+export type CapabilityKey =
+  | "dashboard"
+  | "identify"
+  | "enrollments"
+  | "review"
+  | "persons"
+  | "matches"
+  | "audit"
+  | "settings";
