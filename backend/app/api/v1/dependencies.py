@@ -25,6 +25,7 @@ from app.connectors.redis import RedisJobQueue
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
+from app.services.administration import AccountAdministration, TokenAdministration
 from app.services.authentication import AuthenticationService
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
@@ -102,6 +103,32 @@ def get_object_store(request: Request) -> FilesystemObjectStore:
     if not isinstance(objects, FilesystemObjectStore):
         raise ServiceUnavailableError("the object store is not available")
     return objects
+
+
+def get_default_token_lifetime(request: Request) -> int:
+    """The credential lifetime applied when a request does not name one."""
+    settings: Settings = request.app.state.settings
+    return settings.token_lifetime_days
+
+
+async def get_account_administration(
+    request: Request,
+) -> AsyncIterator[AccountAdministration]:
+    """Build account administration bound to one database transaction."""
+    async with _postgres(request).session() as session:
+        yield AccountAdministration(
+            users=SqlAlchemyUserStore(session),
+            tokens=SqlAlchemyTokenStore(session),
+            audit=SqlAlchemyAuditLog(session),
+        )
+
+
+async def get_token_administration(request: Request) -> AsyncIterator[TokenAdministration]:
+    """Build credential administration bound to one database transaction."""
+    async with _postgres(request).session() as session:
+        yield TokenAdministration(
+            tokens=SqlAlchemyTokenStore(session), audit=SqlAlchemyAuditLog(session)
+        )
 
 
 async def get_authentication_service(

@@ -737,6 +737,57 @@ is the check that was missing.
 ### Known gaps after Phase 12
 
 - No password reset flow, no MFA, no session listing for a user.
-- Integration tests still share the development database.
+- Integration tests shared the development database — **fixed in Phase 13**.
+- No per-person access control; no merge/split; thresholds unvalidated; model
+  weight provenance unresolved.
+
+## Phase 13 — Administration API — ✅ COMPLETE
+
+Account and credential administration over HTTP, so neither requires shell
+access to the container.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Account and credential administration with auditing | `backend/app/services/administration.py` |
+| `/accounts`, `/accounts/{uuid}/password`, `/disable`, `/enable` | `backend/app/api/v1/administration.py` |
+| `/tokens`, `/tokens/{uuid}`, `/me/password` | `backend/app/api/v1/administration.py` |
+| Six new audit actions | `backend/app/domain/audit.py` |
+| Test-database guard | `backend/tests/conftest.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| An account can be created over HTTP and sign in | live | ✅ 201 then 201 |
+| An issued credential works immediately | live `/me` | ✅ right subject and scopes |
+| Revocation takes effect at once | live | ✅ 204 then 401 |
+| Secrets are returned once, never listed | endpoint test and live | ✅ |
+| Administration requires the `admin` scope | live with a reviewer session | ✅ 403 on accounts and tokens |
+| Changing your own password needs no admin scope | endpoint test | ✅ 404 not 403 |
+| The current password is required to change your own | endpoint test | ✅ 403 `wrong_password` |
+| You cannot disable your own account | live | ✅ 409 `account_conflict` |
+| Duplicate emails and weak passwords are refused | endpoint tests | ✅ 409, 422 |
+| Every action is audited against the administrator | live audit read | ✅ actor recorded |
+| The audit never records a secret or password | endpoint test | ✅ |
+| Disabling reports the account's new state | endpoint test | ✅ (bug found and fixed) |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 505 passed |
+
+### Notes
+
+- **The tests had destroyed live data three times** by truncating tables in the
+  working database, including the account created minutes earlier. The suite
+  now refuses to run unless `FACEID_TEST_POSTGRES_DSN` names a database ending
+  in `_test`, which makes the accident impossible rather than merely
+  documented.
+- `set_disabled` returned the account as read *before* the update, so the
+  response claimed an account was still active immediately after disabling it.
+  Caught by an endpoint test, fixed by re-reading.
+
+### Known gaps after Phase 13
+
+- No password reset flow, no MFA, no per-user session listing.
+- No UI for administration; it is API and CLI only.
 - No per-person access control; no merge/split; thresholds unvalidated; model
   weight provenance unresolved.

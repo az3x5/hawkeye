@@ -96,7 +96,7 @@ Detection tests are skipped unless the weights are present, and database tests
 unless a real database is named, so neither can pass silently against nothing:
 
 ```bash
-FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid FACEID_TEST_QDRANT_URL=http://127.0.0.1:6333 FACEID_TEST_REDIS_DSN=redis://127.0.0.1:6379/15 PYTHONPATH=. ../.venv/bin/pytest -q
+FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid_test FACEID_TEST_QDRANT_URL=http://127.0.0.1:6333 FACEID_TEST_REDIS_DSN=redis://127.0.0.1:6379/15 PYTHONPATH=. ../.venv/bin/pytest -q
 ```
 
 Note the Redis database index: the tests and the running `worker` service share
@@ -246,9 +246,24 @@ below, so scopes, auditing and revocation behave identically. The web UI does
 this for you and keeps the result in an httpOnly cookie. Changing a password or
 disabling an account revokes every session it produced.
 
-**Services use issued tokens**, out of band — there is no self-service
-registration, because an API that can mint its own credentials can escalate its
-own privileges:
+**Services use issued tokens.** There is still no self-service registration —
+issuing requires the `admin` scope — but administration is available over HTTP
+as well as from the CLI:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST/GET | `/api/v1/accounts` | Create and list password accounts |
+| POST | `/api/v1/accounts/{uuid}/password` | Set someone's password |
+| POST | `/api/v1/accounts/{uuid}/disable` \| `/enable` | Suspend or restore an account |
+| POST | `/api/v1/me/password` | Change your own password (needs the current one) |
+| POST/GET | `/api/v1/tokens` | Issue and list credentials |
+| DELETE | `/api/v1/tokens/{uuid}` | Revoke a credential |
+
+Secrets are returned once at issue and never appear in a listing. Every one of
+these actions is audited against the administrator who performed it, and you
+cannot disable the account you are signed in as.
+
+The CLI does the same jobs and is the way to bootstrap the first account:
 
 ```bash
 docker compose exec api python -m app.tokens issue --subject alice@example.com --kind user --scope review

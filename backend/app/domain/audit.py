@@ -24,6 +24,12 @@ class AuditAction(StrEnum):
     PERSON_ERASED = "person_erased"
     ORPHANED_VECTORS_PURGED = "orphaned_vectors_purged"
     ORPHANED_IMAGE_PURGED = "orphaned_image_purged"
+    ACCOUNT_CREATED = "account_created"
+    ACCOUNT_PASSWORD_CHANGED = "account_password_changed"  # noqa: S105 - an action name
+    ACCOUNT_DISABLED = "account_disabled"
+    ACCOUNT_ENABLED = "account_enabled"
+    TOKEN_ISSUED = "token_issued"  # noqa: S105 - an action name
+    TOKEN_REVOKED = "token_revoked"  # noqa: S105 - an action name
 
 
 @dataclass(frozen=True, slots=True)

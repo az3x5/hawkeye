@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
@@ -20,6 +21,27 @@ from app.main import create_app
 
 #: Integration tests run only when a real database is pointed at explicitly.
 INTEGRATION_DSN = os.environ.get("FACEID_TEST_POSTGRES_DSN")
+
+#: Fixtures here TRUNCATE whole tables. Pointing them at a working database
+#: destroys real data, which has happened more than once during development, so
+#: the suite refuses to run unless the database is named as a test one.
+_TEST_DATABASE_SUFFIX = "_test"
+
+
+def _require_disposable_database() -> None:
+    if INTEGRATION_DSN is None:
+        return
+    name = urlsplit(INTEGRATION_DSN).path.lstrip("/")
+    if not name.endswith(_TEST_DATABASE_SUFFIX):
+        raise pytest.UsageError(
+            f"FACEID_TEST_POSTGRES_DSN points at database {name!r}. These tests "
+            f"TRUNCATE tables, so the name must end in {_TEST_DATABASE_SUFFIX!r} "
+            "to make clear it is disposable. Create one with:\n"
+            "  createdb faceid_test   (or: CREATE DATABASE faceid_test;)"
+        )
+
+
+_require_disposable_database()
 
 TEST_ENV = {
     "FACEID_ENVIRONMENT": "test",
