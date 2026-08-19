@@ -73,13 +73,55 @@ The map lives in `src/lib/capabilities.ts` and drives what each screen renders.
   359px wide instead of hidden. The Dockerfile also had to be corrected to copy
   the config, or the container build would have reproduced it.
 
+## UI-01 Review workspace — ✅ COMPLETE
+
+Filtering and ordering for the backlog, and continuous keyboard triage.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Filter, sort and position logic (pure) | `src/lib/review-queue.ts` |
+| Interactive queue: search, sort, close-calls filter, policy filter | `src/app/review/queue-table.tsx` |
+| Queue keyboard: `j`/`k` move, `↵` open, `/` focus filter | `src/app/review/queue-table.tsx` |
+| Position in queue, next-item handoff, skip | `src/app/review/[id]/page.tsx`, `review-workspace.tsx` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Search matches identification, person and policy | unit tests | ✅ case- and space-insensitive |
+| Close-calls filter and policy filter combine | unit tests | ✅ |
+| Five orderings, all stable for ties | unit tests | ✅ order never wobbles |
+| A missing margin or score sorts last, not first | unit tests | ✅ |
+| Filtering does not mutate the loaded page | unit test | ✅ |
+| Filters run in the browser and say so | count line, empty state | ✅ "3 of 12 loaded" |
+| Queue keyboard navigation | browser: `j` moved the cursor 0 → 1 | ✅ |
+| Sort and filter controls work live | browser: close-calls filter, closest-call sort | ✅ reordered |
+| Deciding carries the reviewer to the next proposal | browser: confirm → next id, 3 → 2 remaining | ✅ |
+| Keyboard decisions do the same | browser: `r` → next id, 2 → 1 remaining | ✅ |
+| The last proposal stays put and shows its decision | browser | ✅ no Skip, "last in the queue" |
+| Decisions still reach the audit log | database | ✅ two confirmed, one rejected, all as `admin@admin.com` |
+| Build, lint, types, tests | run | ✅ 54 tests pass |
+
+### Notes
+
+- **The API has no server-side filtering**: `GET /identifications` accepts only
+  a `limit`. Filters therefore operate on the loaded page, and the count line
+  and empty state both say so — a filter that silently searches part of the
+  data would be worse than none.
+- Skipping records nothing. An undecided proposal simply stays in the queue,
+  so "skip" is navigation rather than a state the backend would have to model.
+- The cursor is derived during render rather than synced in an effect, which
+  ESLint's `set-state-in-effect` rule correctly flagged as a cascading render.
+
 ## Later phases
 
 Sequenced by backend readiness rather than by preference.
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| UI-01 | Review workspace polish: queue filters, keyboard triage across items | ⬜ NOT STARTED — backend ready |
+| UI-01 | Review workspace: queue filters, keyboard triage across items | ✅ COMPLETE |
 | UI-02 | Identify screen: submit an image, show the decision and candidates | ⬜ NOT STARTED — backend ready |
 | UI-03 | Settings: account, password change, credential administration | ⬜ NOT STARTED — backend ready |
 | UI-04 | Enrollments: submit and track a sample | ⬜ NOT STARTED — partial; needs a sample list endpoint for the register |

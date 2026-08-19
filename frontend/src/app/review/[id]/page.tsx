@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ReviewWorkspace } from "@/app/review/[id]/review-workspace";
-import { ApiError, NotAuthenticatedError, fetchIdentification } from "@/lib/api";
+import {
+  ApiError,
+  NotAuthenticatedError,
+  fetchIdentification,
+  fetchReviewQueue,
+} from "@/lib/api";
+import { afterDeciding, locate } from "@/lib/review-queue";
 import { PageHeader } from "@/components/shell/page-header";
 import { ErrorState } from "@/components/states/error-state";
 import { StatusBadge, toneForOutcome } from "@/components/states/status-badge";
@@ -31,6 +37,14 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
 
   const reviewed = identification.review_outcome !== null;
 
+  // Position in the backlog, so a reviewer knows how much is left and can be
+  // carried straight to the next proposal after deciding this one. A failure
+  // here must not break the screen: triage is a convenience, the decision is
+  // not.
+  const queue = await fetchReviewQueue().catch(() => null);
+  const position = queue ? locate(queue.items, id) : null;
+  const nextId = queue ? afterDeciding(queue.items, id) : null;
+
   return (
     <>
       <Link
@@ -50,9 +64,21 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
       <p className="mb-5 max-w-prose text-sm text-ink-muted">
         {describeOutcome(identification.outcome)}. Scores are raw cosine similarities in
         [-1, 1] — not probabilities, and not percentages.
+        {position !== null ? (
+          <>
+            {" "}
+            <span className="text-ink-faint">
+              {position.index + 1} of {position.total} awaiting review.
+            </span>
+          </>
+        ) : null}
       </p>
 
-      <ReviewWorkspace identification={identification} />
+      <ReviewWorkspace
+        identification={identification}
+        nextId={nextId}
+        position={position}
+      />
 
       {/* The decision form lives in the workspace, beside the comparison it
           depends on. This section is only for outcomes already settled. */}

@@ -14,7 +14,16 @@ import type { Identification, ReviewOutcome } from "@/lib/types";
  * scale, the decision buttons — is arranged around that comparison rather than
  * stacked above and below it.
  */
-export function ReviewWorkspace({ identification }: { identification: Identification }) {
+export function ReviewWorkspace({
+  identification,
+  nextId = null,
+  position = null,
+}: {
+  identification: Identification;
+  /** The proposal to move to once this one is decided, if any. */
+  nextId?: string | null;
+  position?: { index: number; total: number } | null;
+}) {
   const router = useRouter();
   const { candidates, thresholds, margin } = identification;
 
@@ -54,9 +63,18 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
         setSubmitting(false);
         return;
       }
-      startTransition(() => router.refresh());
+      // Carry on to the next proposal rather than leaving the reviewer on a
+      // decision they have finished with. When the queue is empty, refresh in
+      // place so the recorded decision is shown.
+      startTransition(() => {
+        if (nextId !== null) {
+          router.push(`/review/${nextId}`);
+        } else {
+          router.refresh();
+        }
+      });
     },
-    [decidable, submitting, identification.identification_uuid, note, router],
+    [decidable, submitting, identification.identification_uuid, note, router, nextId],
   );
 
   // Someone working through a backlog should not have to reach for the mouse.
@@ -74,11 +92,15 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
         void submit("confirmed");
       } else if (event.key.toLowerCase() === "r") {
         void submit("rejected");
+      } else if (event.key.toLowerCase() === "s" && nextId !== null) {
+        // Skip: move on without deciding. Nothing is recorded — an
+        // undecided proposal simply stays in the queue.
+        router.push(`/review/${nextId}`);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [candidates.length, submit]);
+  }, [candidates.length, submit, nextId, router]);
 
   return (
     <>
@@ -211,7 +233,22 @@ export function ReviewWorkspace({ identification }: { identification: Identifica
               >
                 Reject match <kbd className="ml-1.5 opacity-70">R</kbd>
               </button>
+            {nextId !== null ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/review/${nextId}`)}
+                className="rounded-md border border-line px-4 py-2 text-sm font-semibold text-ink-muted hover:text-ink"
+              >
+                Skip <kbd className="ml-1.5 opacity-70">S</kbd>
+              </button>
+            ) : null}
             </div>
+            {position !== null ? (
+              <p className="text-xs text-ink-faint">
+                {position.index + 1} of {position.total} awaiting review
+                {nextId !== null ? " · deciding moves to the next" : " · last in the queue"}
+              </p>
+            ) : null}
             <p className="rounded-md border-l-2 border-line-strong bg-surface-raised px-3 py-2 text-sm text-ink-muted">
               Recorded against the identity you signed in with, in an append-only audit log, and
               cannot be changed afterwards.
