@@ -74,6 +74,28 @@ export interface Health {
   environment: string;
 }
 
+export type ProcessingState = "pending" | "processed" | "failed";
+
+export interface FaceSample {
+  face_sample_uuid: string;
+  person_uuid: string;
+  source: string;
+  image_sha256: string;
+  processing_state: ProcessingState;
+  captured_at: string | null;
+  created_at: string;
+  processed_at: string | null;
+  failure_reason: string | null;
+}
+
+export interface Enrolment {
+  person_uuid: string;
+  sample: FaceSample;
+  /** False when this submission repeated an earlier one. */
+  created: boolean;
+  status: "accepted" | "already_enrolled";
+}
+
 export interface Account {
   user_uuid: string;
   email: string;

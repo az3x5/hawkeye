@@ -10,6 +10,8 @@ import { readToken } from "./session";
 import type {
   Account,
   ApiErrorBody,
+  Enrolment,
+  FaceSample,
   Health,
   IssuedToken,
   Readiness,
@@ -279,4 +281,54 @@ export function issueToken(body: {
 /** Revoke a credential. Takes effect on its next request. */
 export async function revokeToken(tokenUuid: string): Promise<void> {
   await request<void>(`/api/v1/tokens/${tokenUuid}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Enrolment
+// ---------------------------------------------------------------------------
+
+/**
+ * Register a face against a person.
+ *
+ * Idempotent at the API: the same image under the same identifiers returns the
+ * original person and sample and schedules no further work, which the caller
+ * can tell from `created`.
+ */
+export async function submitEnrolment(fields: {
+  source: string;
+  externalId: string | null;
+  localId: string | null;
+  capturedAt: string | null;
+  image: File;
+}): Promise<Enrolment> {
+  const token = await readToken();
+  if (token === null) throw new NotAuthenticatedError();
+
+  const body = new FormData();
+  body.append("source", fields.source);
+  body.append("image", fields.image);
+  if (fields.externalId) body.append("external_id", fields.externalId);
+  if (fields.localId) body.append("local_id", fields.localId);
+  if (fields.capturedAt) body.append("captured_at", fields.capturedAt);
+
+  const response = await fetch(`${apiBaseUrl()}/api/v1/enrolments`, {
+    method: "POST",
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    body,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    if (isErrorBody(payload)) {
+      throw new ApiError(response.status, payload.error.code, payload.error.message);
+    }
+    throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
+  }
+  return (await response.json()) as Enrolment;
+}
+
+/** One face sample, including how far it has got through the pipeline. */
+export function fetchFaceSample(faceSampleUuid: string): Promise<FaceSample> {
+  return request<FaceSample>(`/api/v1/face-samples/${faceSampleUuid}`);
 }

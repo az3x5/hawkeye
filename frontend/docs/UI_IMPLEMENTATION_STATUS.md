@@ -203,6 +203,49 @@ Your own account, and — with the `admin` scope — everybody else's.
 - The self-disable guard mirrors a rule the API already enforces. Disabling it
   in the UI avoids inviting a mistake the server would reject anyway.
 
+## UI-04 Enrollments — ✅ COMPLETE
+
+Submit a face and follow it through detection and embedding. The register
+itself remains impossible: the API has no endpoint for listing samples.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Enrolment form, preview, submission | `src/app/enrollments/enrol-console.tsx` |
+| Sample lookup by uuid | same |
+| Live tracking of pending samples | same (polling `GET /face-samples/{uuid}`) |
+| Server actions for enrolment and sample state | `src/app/enrollments/actions.ts` |
+| Typed client and domain types | `src/lib/api.ts`, `src/lib/types.ts` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| A real enrolment succeeds | browser: uploaded a face under source `ui04` | ✅ row appears as `pending` |
+| The sample is followed to completion | browser, without reloading | ✅ `pending` → `processed` |
+| Repeat submissions are recognised | browser: same image and identifiers twice | ✅ no second row, "already enrolled" |
+| A faceless image fails with its reason | browser: blank image | ✅ `failed`, "no face was detected in the image" |
+| An identifier is required, and why is explained | browser: submitted without one | ✅ guard fires before the request |
+| Samples reach the database | database | ✅ rows under source `ui04` |
+| Nothing is written to browser storage | browser | ✅ `localStorage` and `sessionStorage` empty |
+| The tracked list is not passed off as a register | copy and empty state | ✅ says so explicitly |
+| Missing scopes are stated | `/enrollments` checks `enrol`; images need `review` | ✅ |
+| Build, lint, types, tests | run | ✅ 54 tests pass |
+
+### Notes
+
+- **Enrolment is asynchronous**, so the screen polls `GET /face-samples/{uuid}`
+  every two seconds while anything is pending, capped at a minute. Without
+  that, a sample would sit at `pending` until the operator guessed to reload.
+- The list shows only what was submitted or looked up **in this browser
+  session**, held in memory. It is labelled as such in both the empty state and
+  the table copy, because presenting it as a register would misrepresent what
+  the system can actually tell you.
+- Sample images come through the proxy, which requires `review`. An account
+  holding `enrol` alone tracks samples without thumbnails, and the column is
+  omitted rather than showing broken images.
+
 ## Later phases
 
 Sequenced by backend readiness rather than by preference.
@@ -212,7 +255,7 @@ Sequenced by backend readiness rather than by preference.
 | UI-01 | Review workspace: queue filters, keyboard triage across items | ✅ COMPLETE |
 | UI-02 | Identify screen: submit an image, show the decision and candidates | ✅ COMPLETE |
 | UI-03 | Settings: account, password change, credential administration | ✅ COMPLETE |
-| UI-04 | Enrollments: submit and track a sample | ⬜ NOT STARTED — partial; needs a sample list endpoint for the register |
+| UI-04 | Enrollments: submit and track a sample | ✅ COMPLETE — register still blocked on a list endpoint |
 | UI-05 | Matches: identification history | 🚫 BLOCKED — needs a history endpoint beyond the review queue |
 | UI-06 | Persons: browse people and their samples | 🚫 BLOCKED — needs person list and read endpoints |
 | UI-07 | Audit: view the audit log | 🚫 BLOCKED — needs a read endpoint for `audit_events` |
