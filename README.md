@@ -3,9 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 9 (token lifetime, rate limiting) complete.** Credentials
-expire, expensive endpoints are rate limited per credential, and every endpoint
-requires a scoped bearer token — see
+**Status: Phase 10 (erasure) complete.** A person can be erased from metadata,
+vectors and image storage together, with an audit record that outlives them —
+see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -207,6 +207,7 @@ No credential is defaulted in code and `.env` is git-ignored.
 | GET | `/api/v1/identifications/{uuid}` | Read a past decision and its policy. |
 | GET | `/api/v1/identifications` | List proposals awaiting review, oldest first. |
 | POST | `/api/v1/identifications/{uuid}/review` | Record a human's conclusion. Audited. |
+| DELETE | `/api/v1/persons/{uuid}` | Erase a person and their biometric material. Audited, `admin` scope. |
 | GET | `/api/v1/identifications/{uuid}/image` | The submitted query image. |
 | GET | `/api/v1/face-samples/{uuid}/image` | An enrolled sample image. |
 
@@ -243,6 +244,21 @@ Credentials expire after `FACEID_TOKEN_LIFETIME_DAYS` (default 90) unless
 asked for explicitly, and warns: such a credential stays valid until somebody
 notices it has leaked. An expired credential is refused exactly like a revoked
 one.
+
+## Erasure
+
+```bash
+curl -sS -X DELETE "http://127.0.0.1:8000/api/v1/persons/$PERSON?reason=subject+request" -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Removes the person's metadata, their embeddings across **every** model
+provenance, and their stored images. An image shared with another person's
+sample is kept, so `images_removed` can be lower than `samples_removed`. The
+audit record names who erased them and survives the deletion.
+
+A reconciliation sweep runs hourly in the worker and removes vectors whose
+person no longer exists — leftovers from before erasure existed, or from a
+partial failure.
 
 ## Rate limiting
 

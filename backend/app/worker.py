@@ -27,14 +27,16 @@ from app.core.logging import configure_logging
 from app.domain.jobs import EmbeddingJob
 from app.domain.vectors import StoredEmbedding
 from app.retention import purge_expired_query_images
+from app.services.erasure import reconcile_orphaned_vectors
 
 logger = logging.getLogger(__name__)
 
 #: How long a reserve() call waits before looping, so shutdown stays responsive.
 RESERVE_TIMEOUT_SECONDS = 5
 
-#: How often expired query images are swept. Retention is a policy measured in
-#: days, so sweeping hourly is ample and keeps the worker's main job first.
+#: How often housekeeping runs. Retention is a policy measured in days and
+#: orphaned vectors should not arise at all now erasure exists, so hourly is
+#: ample and keeps the worker's main job first.
 PURGE_INTERVAL_SECONDS = 3600
 
 
@@ -97,10 +99,10 @@ class EmbeddingWorker:
             await self.process(job)
 
     async def _maybe_purge(self) -> None:
-        """Run the retention sweep if it is due.
+        """Run housekeeping if it is due.
 
-        Failures are logged and swallowed: retention housekeeping must never
-        stop the worker from embedding faces.
+        Failures are logged and swallowed: housekeeping must never stop the
+        worker from embedding faces.
         """
         now = asyncio.get_running_loop().time()
         if now - self._last_purge < PURGE_INTERVAL_SECONDS:
@@ -116,6 +118,19 @@ class EmbeddingWorker:
                 )
         except Exception:  # noqa: BLE001 - logged; the sweep retries next hour
             logger.exception("retention sweep failed")
+
+        try:
+            async with self._postgres.session() as session:
+                # Erasure keeps the stores in step; this catches anything that
+                # fell out of step before it existed, or through a partial
+                # failure. A face with no person attached is still searchable.
+                await reconcile_orphaned_vectors(
+                    session=session,
+                    vectors=self._vectors,
+                    audit=SqlAlchemyAuditLog(session),
+                )
+        except Exception:  # noqa: BLE001 - logged; the sweep retries next hour
+            logger.exception("orphaned vector reconciliation failed")
 
     async def process(self, job: EmbeddingJob) -> None:
         """Handle one job, recording the outcome in both the queue and the database."""

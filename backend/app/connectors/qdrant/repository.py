@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 import numpy as np
 from qdrant_client import models
 
 from app.connectors.qdrant.connector import QdrantConnector
-from app.connectors.qdrant.naming import collection_name
+from app.connectors.qdrant.naming import COLLECTION_PREFIX, collection_name
 from app.domain.recognition import EmbeddingProvenance, FaceEmbedding
 from app.domain.vectors import StoredEmbedding, VectorMatch
 
@@ -152,13 +153,52 @@ class QdrantVectorRepository:
             raise TypeError(f"expected a dense vector for {face_sample_uuid}, got {type(vector)}")
         return FaceEmbedding(vector=np.asarray(vector, dtype=np.float32), provenance=provenance)
 
-    async def delete_person(self, person_uuid: UUID, provenance: EmbeddingProvenance) -> int:
-        """Remove every embedding belonging to a person."""
-        name = collection_name(provenance)
-        client = self._connector.client
-        if not await client.collection_exists(name):
-            return 0
+    async def collections(self) -> list[str]:
+        """Every collection this repository owns, across all provenances."""
+        described = await self._connector.client.get_collections()
+        return [
+            description.name
+            for description in described.collections
+            if description.name.startswith(f"{COLLECTION_PREFIX}__")
+        ]
 
+    async def delete_person_everywhere(self, person_uuid: UUID) -> int:
+        """Remove a person's vectors from every provenance.
+
+        Erasure cannot be scoped to the current model: embeddings made under an
+        older model or preprocessing live in their own collections and would
+        otherwise survive the person's deletion.
+        """
+        removed = 0
+        for name in await self.collections():
+            removed += await self._delete_by_person(name, person_uuid)
+        return removed
+
+    async def person_uuids(self, collection: str, *, batch: int = 512) -> set[UUID]:
+        """Every person referenced by a collection's payloads.
+
+        Used by reconciliation to find vectors whose person no longer exists.
+        """
+        found: set[UUID] = set()
+        # The client types its own cursor loosely; it is opaque to us and is
+        # only ever handed straight back.
+        offset: Any = None
+        while True:
+            points, offset = await self._connector.client.scroll(
+                collection_name=collection,
+                limit=batch,
+                offset=offset,
+                with_payload=[PAYLOAD_PERSON],
+                with_vectors=False,
+            )
+            for point in points:
+                if point.payload is not None:
+                    found.add(UUID(point.payload[PAYLOAD_PERSON]))
+            if offset is None:
+                break
+        return found
+
+    async def _delete_by_person(self, collection: str, person_uuid: UUID) -> int:
         condition = models.Filter(
             must=[
                 models.FieldCondition(
@@ -166,10 +206,20 @@ class QdrantVectorRepository:
                 )
             ]
         )
-        before = await client.count(collection_name=name, count_filter=condition, exact=True)
+        client = self._connector.client
+        before = await client.count(collection_name=collection, count_filter=condition, exact=True)
+        if before.count == 0:
+            return 0
         await client.delete(
-            collection_name=name,
+            collection_name=collection,
             points_selector=models.FilterSelector(filter=condition),
             wait=True,
         )
         return int(before.count)
+
+    async def delete_person(self, person_uuid: UUID, provenance: EmbeddingProvenance) -> int:
+        """Remove every embedding belonging to a person."""
+        name = collection_name(provenance)
+        if not await self._connector.client.collection_exists(name):
+            return 0
+        return await self._delete_by_person(name, person_uuid)

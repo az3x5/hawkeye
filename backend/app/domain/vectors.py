@@ -81,5 +81,21 @@ class VectorRepository(Protocol):
         ...
 
     async def delete_person(self, person_uuid: UUID, provenance: EmbeddingProvenance) -> int:
-        """Remove every embedding belonging to a person. Returns the count."""
+        """Remove a person's embeddings under one provenance. Returns the count."""
+        ...
+
+    async def delete_person_everywhere(self, person_uuid: UUID) -> int:
+        """Remove a person's embeddings under every provenance.
+
+        Erasure cannot be scoped to the current model: embeddings made under an
+        older model or preprocessing would otherwise survive the deletion.
+        """
+        ...
+
+    async def collections(self) -> list[str]:
+        """Every collection holding embeddings, across all provenances."""
+        ...
+
+    async def person_uuids(self, collection: str, *, batch: int = 512) -> set[UUID]:
+        """Every person referenced by a collection's payloads."""
         ...

@@ -464,3 +464,42 @@ itself audited.
 An image is never purged while an enrolled sample shares its content hash:
 enrolled faces are held under a different policy and must not be deleted
 because someone happened to identify against the same picture.
+
+## 12. Erasure
+
+Deleting a row is not erasure. A person's face lives in three places —
+metadata, vectors and stored images — and all three must go together, or the
+face stays searchable through whichever one was missed. `DELETE
+/api/v1/persons/{uuid}` removes all three, and requires the `admin` scope.
+
+**Ordering matters.** Image hashes are read before the rows are deleted,
+because the rows are what name them. Vectors go before the metadata, so a
+failure part-way leaves a person whose vectors are gone rather than vectors
+nobody can attribute.
+
+**Erasure is not scoped to the current model.** Embeddings made under an older
+model or preprocessing live in their own collections;
+`delete_person_everywhere` sweeps all of them, or a model upgrade would leave a
+person's old face behind after they asked to be forgotten.
+
+**A shared photograph is kept.** Two people may have been enrolled from the
+same image; erasing one must not destroy the other's sample. The image is
+deleted only when no remaining sample references its hash, which is why
+`images_removed` can be lower than `samples_removed`.
+
+**The audit record outlives the person.** `audit_events` carries no foreign
+keys precisely so this works: a deletion that leaves no trace cannot be shown
+to have happened. The record names who did it and why.
+
+### Reconciliation
+
+Erasure keeps the stores in step from now on. Reconciliation catches what fell
+out of step before it existed, or through a partial failure: it lists the
+people referenced by each collection, asks the metadata store which of them
+still exist, and removes the rest. A face with no person attached is the worst
+kind of leftover — still searchable, and no longer attributable to anyone who
+could ask for its removal.
+
+It runs hourly in the worker alongside retention, and its failures are logged
+and swallowed for the same reason: housekeeping must never stop the worker
+embedding faces.

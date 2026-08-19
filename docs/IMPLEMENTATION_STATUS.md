@@ -583,9 +583,56 @@ speed.
 
 ### Known gaps after Phase 9
 
-- **Orphaned vectors.** Deleting a person from PostgreSQL does not remove their
-  embeddings from Qdrant, so their face stays searchable. There is no deletion
-  endpoint today, which limits the exposure, but an erasure path is the obvious
-  next piece of work.
+- **Orphaned vectors** — fixed in Phase 10.
 - No per-person access control, no merge/split, thresholds still unvalidated,
   model weight provenance unresolved.
+
+## Phase 10 — Erasure — ✅ COMPLETE
+
+Closes the privacy hole Phase 9 named: a person deleted from the metadata store
+kept a searchable face in the vector store.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Cross-provenance deletion, collection and person enumeration | `backend/app/connectors/qdrant/repository.py` |
+| `PersonEraser`, `reconcile_orphaned_vectors` | `backend/app/services/erasure.py` |
+| `DELETE /persons/{uuid}` (`admin` scope) | `backend/app/api/v1/persons.py` |
+| Hourly reconciliation in housekeeping | `backend/app/worker.py` |
+| `person_erased`, `orphaned_vectors_purged` actions | `backend/app/domain/audit.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| The person is removed from the metadata store | integration test | ✅ |
+| Their samples go with them | integration test | ✅ cascade |
+| Their face is no longer searchable | vector fetched, erased, refetched | ✅ gone |
+| Vectors from every model version are removed | two provenances | ✅ both, count 2 |
+| Their stored image is deleted | integration test | ✅ |
+| An image shared with another person is kept | two people, one photograph | ✅ `images_removed` 0, other person intact |
+| Another person's vectors are untouched | integration test | ✅ |
+| Erasure is audited and the record survives | audit read after deletion | ✅ actor, reason, counts; person row gone |
+| Erasing an unknown or already-erased person is reported | integration and live | ✅ 404 `person_not_found` |
+| Only `admin` may erase | live with an `enrol`/`identify` credential | ✅ 403 |
+| Orphaned vectors are removed | integration and live | ✅ 25 real leftovers cleaned |
+| A dry run reports without deleting | integration test | ✅ |
+| Reconciliation is audited as a system action | integration test | ✅ |
+| No orphans remain in the live system | dry run against live data | ✅ 0 |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 415 passed |
+
+### Notes
+
+- Reconciliation found and removed 25 genuinely orphaned vectors created by
+  earlier phases' testing, which is the clearest evidence the hole was real.
+- The reconciliation tests assert `>= 1` rather than an exact count: they scan
+  every collection, so the total depends on what else the environment holds.
+  The specific vector under test is still asserted gone.
+
+### Known gaps after Phase 10
+
+- No per-person access control; no merge/split; thresholds unvalidated; model
+  weight provenance unresolved; erasure is not transactional across the three
+  stores, so a crash mid-erase can leave images behind (reconciliation covers
+  vectors, but not images).

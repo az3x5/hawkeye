@@ -24,6 +24,7 @@ from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
 from app.services.enrolment import EnrolmentService, SampleReader
+from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
 
 
@@ -98,6 +99,22 @@ def get_object_store(request: Request) -> FilesystemObjectStore:
     if not isinstance(objects, FilesystemObjectStore):
         raise ServiceUnavailableError("the object store is not available")
     return objects
+
+
+async def get_person_eraser(request: Request) -> AsyncIterator[PersonEraser]:
+    """Build an eraser bound to one database transaction."""
+    qdrant = getattr(request.app.state, "qdrant", None)
+    objects = getattr(request.app.state, "objects", None)
+    if qdrant is None or not isinstance(objects, FilesystemObjectStore):
+        raise ServiceUnavailableError("erasure is not available")
+
+    async with _postgres(request).session() as session:
+        yield PersonEraser(
+            session=session,
+            vectors=QdrantVectorRepository(qdrant),
+            objects=objects,
+            audit=SqlAlchemyAuditLog(session),
+        )
 
 
 async def get_sample_reader(request: Request) -> AsyncIterator[SampleReader]:
