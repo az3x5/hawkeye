@@ -22,8 +22,8 @@ from app.core.config import get_settings
 from app.domain.auth import Scope, new_token
 
 
-async def _issue(subject: str, kind: str, scopes: list[Scope]) -> int:
-    record, secret = new_token(subject, kind, scopes)
+async def _issue(subject: str, kind: str, scopes: list[Scope], lifetime_days: int | None) -> int:
+    record, secret = new_token(subject, kind, scopes, lifetime_days=lifetime_days)
     connector = PostgresConnector(str(get_settings().postgres_dsn))
     try:
         async with connector.session() as session:
@@ -34,8 +34,14 @@ async def _issue(subject: str, kind: str, scopes: list[Scope]) -> int:
     print(f"token_uuid : {record.token_uuid}")
     print(f"subject    : {record.subject} ({record.kind})")
     print(f"scopes     : {', '.join(sorted(s.value for s in record.scopes))}")
+    print(f"expires    : {record.expires_at.isoformat() if record.expires_at else 'never'}")
     print(f"secret     : {secret}")
     print("\nStore the secret now: it is not recoverable, only its hash is kept.")
+    if record.expires_at is None:
+        print(
+            "WARNING: this credential never expires. It stays valid until somebody "
+            "notices it has leaked."
+        )
     return 0
 
 
@@ -51,9 +57,13 @@ async def _list() -> int:
         print("no credentials have been issued")
         return 0
     for token in tokens:
-        state = "active" if token.active else "revoked"
+        state = "active" if token.usable() else ("revoked" if not token.active else "expired")
         scopes = ", ".join(sorted(s.value for s in token.scopes))
-        print(f"{token.token_uuid}  {state:8}  {token.kind:7}  {token.subject:32}  {scopes}")
+        expires = token.expires_at.date().isoformat() if token.expires_at else "never"
+        print(
+            f"{token.token_uuid}  {state:8}  {token.kind:7}  {token.subject:28}  "
+            f"{expires:10}  {scopes}"
+        )
     return 0
 
 
@@ -84,6 +94,17 @@ def main(argv: list[str] | None = None) -> int:
         choices=[s.value for s in Scope],
         help="may be repeated",
     )
+    lifetime = issue.add_mutually_exclusive_group()
+    lifetime.add_argument(
+        "--expires-in-days",
+        type=int,
+        help="credential lifetime; defaults to FACEID_TOKEN_LIFETIME_DAYS",
+    )
+    lifetime.add_argument(
+        "--never-expires",
+        action="store_true",
+        help="mint a credential with no end date; must be asked for explicitly",
+    )
 
     commands.add_parser("list", help="list issued credentials")
 
@@ -92,7 +113,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "issue":
-        return asyncio.run(_issue(args.subject, args.kind, [Scope(s) for s in args.scope]))
+        lifetime_days = (
+            None
+            if args.never_expires
+            else (args.expires_in_days or get_settings().token_lifetime_days)
+        )
+        return asyncio.run(
+            _issue(args.subject, args.kind, [Scope(s) for s in args.scope], lifetime_days)
+        )
     if args.command == "list":
         return asyncio.run(_list())
     return asyncio.run(_revoke(args.token_uuid))

@@ -33,6 +33,7 @@ class SqlAlchemyTokenStore:
                 scopes=sorted(scope.value for scope in token.scopes),
                 created_at=token.created_at,
                 disabled_at=token.disabled_at,
+                expires_at=token.expires_at,
             )
         )
         return token
@@ -76,4 +77,5 @@ class SqlAlchemyTokenStore:
             scopes=frozenset(Scope(s) for s in row.scopes if s in set(Scope)),
             created_at=row.created_at,
             disabled_at=row.disabled_at,
+            expires_at=row.expires_at,
         )

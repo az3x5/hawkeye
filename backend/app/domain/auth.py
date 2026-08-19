@@ -11,7 +11,7 @@ import hashlib
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 from uuid import UUID, uuid4
@@ -86,7 +86,12 @@ class Principal:
 
 @dataclass(frozen=True, slots=True)
 class ApiToken:
-    """A credential as stored. The secret itself is never held."""
+    """A credential as stored. The secret itself is never held.
+
+    ``expires_at`` of None means the credential never expires. That is
+    permitted but should be rare: a credential with no end date is one that
+    stays valid until somebody notices it has leaked.
+    """
 
     token_uuid: UUID
     subject: str
@@ -95,10 +100,21 @@ class ApiToken:
     scopes: frozenset[Scope]
     created_at: datetime
     disabled_at: datetime | None = None
+    expires_at: datetime | None = None
+
+    def expired(self, *, now: datetime | None = None) -> bool:
+        """Whether the credential's lifetime has run out."""
+        if self.expires_at is None:
+            return False
+        return (now or datetime.now(UTC)) >= self.expires_at
+
+    def usable(self, *, now: datetime | None = None) -> bool:
+        """Whether the credential may be used: neither revoked nor expired."""
+        return self.disabled_at is None and not self.expired(now=now)
 
     @property
     def active(self) -> bool:
-        """Whether the credential may still be used."""
+        """Whether the credential has been revoked. Prefer ``usable``."""
         return self.disabled_at is None
 
 
@@ -117,8 +133,22 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def new_token(subject: str, kind: str, scopes: Sequence[Scope]) -> tuple[ApiToken, str]:
-    """Create a credential, returning the record and the one-time secret."""
+def new_token(
+    subject: str,
+    kind: str,
+    scopes: Sequence[Scope],
+    *,
+    lifetime_days: int | None,
+) -> tuple[ApiToken, str]:
+    """Create a credential, returning the record and the one-time secret.
+
+    ``lifetime_days`` of None mints a credential that never expires; callers
+    must choose that deliberately rather than getting it by omission.
+    """
+    if lifetime_days is not None and lifetime_days < 1:
+        raise ValueError(f"lifetime_days must be at least 1, got {lifetime_days}")
+
+    issued = datetime.now(UTC)
     secret = generate_token()
     record = ApiToken(
         token_uuid=uuid4(),
@@ -126,7 +156,8 @@ def new_token(subject: str, kind: str, scopes: Sequence[Scope]) -> tuple[ApiToke
         kind=kind,
         token_sha256=hash_token(secret),
         scopes=frozenset(scopes),
-        created_at=datetime.now(UTC),
+        created_at=issued,
+        expires_at=None if lifetime_days is None else issued + timedelta(days=lifetime_days),
     )
     return record, secret
 

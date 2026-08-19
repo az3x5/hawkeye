@@ -132,6 +132,7 @@ async def read_image_upload(upload: UploadFile) -> bytes:
         403: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
     },
 )

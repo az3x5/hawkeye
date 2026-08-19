@@ -39,7 +39,7 @@ class TestTokenGeneration:
         assert len(first) > 40
 
     def test_the_secret_is_not_recoverable_from_the_record(self) -> None:
-        record, secret = new_token("alice", "user", [Scope.REVIEW])
+        record, secret = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         assert secret not in str(record)
         assert record.token_sha256 == hash_token(secret)
 
@@ -99,7 +99,7 @@ class TestTokenStore:
             assert isinstance(SqlAlchemyTokenStore(session), TokenStore)
 
     async def test_a_credential_is_found_by_its_hash(self, connector: PostgresConnector) -> None:
-        record, secret = new_token("alice", "user", [Scope.REVIEW])
+        record, secret = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         async with connector.session() as session:
             await SqlAlchemyTokenStore(session).add(record)
         async with connector.session() as session:
@@ -109,7 +109,7 @@ class TestTokenStore:
         assert found.scopes == frozenset({Scope.REVIEW})
 
     async def test_the_secret_is_never_stored(self, connector: PostgresConnector) -> None:
-        record, secret = new_token("alice", "user", [Scope.REVIEW])
+        record, secret = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         async with connector.session() as session:
             await SqlAlchemyTokenStore(session).add(record)
         async with connector.session() as session:
@@ -121,7 +121,7 @@ class TestTokenStore:
             assert await SqlAlchemyTokenStore(session).find_by_hash("0" * 64) is None
 
     async def test_revoking_marks_it_unusable(self, connector: PostgresConnector) -> None:
-        record, secret = new_token("alice", "user", [Scope.REVIEW])
+        record, secret = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         async with connector.session() as session:
             await SqlAlchemyTokenStore(session).add(record)
         async with connector.session() as session:
@@ -132,7 +132,7 @@ class TestTokenStore:
         assert found.active is False
 
     async def test_revoking_twice_changes_nothing(self, connector: PostgresConnector) -> None:
-        record, _ = new_token("alice", "user", [Scope.REVIEW])
+        record, _ = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         async with connector.session() as session:
             await SqlAlchemyTokenStore(session).add(record)
         async with connector.session() as session:
@@ -143,7 +143,7 @@ class TestTokenStore:
     async def test_an_unknown_scope_name_does_not_lock_anyone_out(
         self, connector: PostgresConnector
     ) -> None:
-        record, secret = new_token("alice", "user", [Scope.REVIEW])
+        record, secret = new_token("alice", "user", [Scope.REVIEW], lifetime_days=90)
         async with connector.session() as session:
             await SqlAlchemyTokenStore(session).add(record)
             await session.execute(

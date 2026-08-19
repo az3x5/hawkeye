@@ -47,6 +47,18 @@ class FaceIdError(Exception):
         )
 
 
+class RateLimitedError(FaceIdError):
+    """The caller has made too many requests."""
+
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "rate_limited"
+
+    def __init__(self, message: str, *, retry_after_seconds: int) -> None:
+        """Record how long the caller should wait before retrying."""
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class ServiceUnavailableError(FaceIdError):
     """A required downstream dependency is not usable."""
 
@@ -63,7 +75,12 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(FaceIdError)
     async def _faceid(_: Request, exc: FaceIdError) -> JSONResponse:
-        return _json(exc.status_code, exc.to_response())
+        response = _json(exc.status_code, exc.to_response())
+        if isinstance(exc, RateLimitedError):
+            # Tell the caller when to come back rather than leaving them to
+            # guess and retry into the same wall.
+            response.headers["Retry-After"] = str(exc.retry_after_seconds)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

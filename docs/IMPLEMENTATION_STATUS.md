@@ -521,7 +521,7 @@ retention question that query-image storage opened.
 
 ### Deliberately NOT in Phase 8
 
-No token expiry (revocation is manual), no rate limiting, no per-person access
+No token expiry, no rate limiting (both added in Phase 9), no per-person access
 control — any `review` holder can see any identification. No merge/split, still.
 
 ### Notes
@@ -530,3 +530,62 @@ control — any `review` holder can see any identification. No merge/split, stil
   asserts that a name supplied in the body is ignored.
 - Vitest needed its own alias config to resolve `@/` the way the app does;
   without it the proxy tests silently could not import the route.
+
+## Phase 9 — Token lifetime and rate limiting — ✅ COMPLETE
+
+Narrows the two attack surfaces Phase 8 left open: a leaked credential was
+valid until somebody noticed, and nothing stopped one probing the gallery at
+speed.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Credential expiry, `usable()`, lifetime at issue | `backend/app/domain/auth.py` |
+| `expires_at` storage + revision `6904bc245c44` | `backend/app/connectors/postgres/{tables,tokens}.py` |
+| `--expires-in-days` / `--never-expires`, expiry in `list` | `backend/app/tokens.py` |
+| Fixed-window limiter | `backend/app/connectors/redis/rate_limit.py` |
+| `rate_limited` dependency, 429 with `Retry-After` | `backend/app/api/v1/security.py`, `backend/app/core/errors.py` |
+| Identification records outlive their people + revision `cde2c7d24322` | `backend/app/connectors/postgres/tables.py` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| A lifetime is applied at issue | live `issue` | ✅ 90-day default shown |
+| An expired credential is refused | backdated expiry, live | ✅ 401, same message as revoked |
+| `list` distinguishes active, revoked and expired | live | ✅ |
+| A never-expiring credential must be asked for, and warns | live | ✅ explicit flag + warning |
+| Requests within the limit are allowed | unit and live | ✅ 29 of 30 remaining after one |
+| The next request is refused | live burst of 33 | ✅ 30 × 201 then 429 |
+| A refusal says when to come back | live headers | ✅ `Retry-After: 46` |
+| Callers and actions are counted separately | unit | ✅ |
+| The window expires | unit, real Redis | ✅ |
+| Hammering cannot extend the window | unit | ✅ retry-after never grows |
+| Authorisation is checked before counting | unit | ✅ 403 consumes nothing |
+| An unconfigured limiter fails open, visibly | unit | ✅ serves, logs a warning |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 400 passed |
+
+### Notes
+
+- **A 500 found by running it, not by testing it.** Identification crashed when
+  the vector store still held a candidate the metadata store had forgotten —
+  `identifications.best_person_uuid` had a foreign key to `persons`. An
+  identification is a historical record and must outlive the person it named,
+  exactly as `audit_events` does; the constraint is dropped and two regression
+  tests cover it. Alembic does not autogenerate foreign-key removal, so that
+  migration is hand-written.
+- Two test-isolation defects surfaced in the same run and are fixed: the Qdrant
+  suite created collections under the *real* model name and dropped them in
+  teardown, deleting the collection the worker tests were using; and a worker
+  assertion inferred point count from a similarity search, which is meaningless
+  when identical photographs produce tied vectors.
+
+### Known gaps after Phase 9
+
+- **Orphaned vectors.** Deleting a person from PostgreSQL does not remove their
+  embeddings from Qdrant, so their face stays searchable. There is no deletion
+  endpoint today, which limits the exposure, but an erasure path is the obvious
+  next piece of work.
+- No per-person access control, no merge/split, thresholds still unvalidated,
+  model weight provenance unresolved.

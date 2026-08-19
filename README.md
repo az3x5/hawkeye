@@ -3,10 +3,9 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 8 (authentication, authorisation, retention) complete.** Every
-endpoint requires a scoped bearer token, decisions are attributed to the
-authenticated principal rather than a typed name, and submitted images expire
-on a configured schedule — see
+**Status: Phase 9 (token lifetime, rate limiting) complete.** Credentials
+expire, expensive endpoints are rate limited per credential, and every endpoint
+requires a scoped bearer token — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -238,6 +237,24 @@ docker compose exec api python -m app.tokens issue --subject alice@example.com -
 The secret is printed once and stored only as a SHA-256; it is not recoverable.
 `list` and `revoke <token-uuid>` manage them, and revocation takes effect on the
 next request.
+
+Credentials expire after `FACEID_TOKEN_LIFETIME_DAYS` (default 90) unless
+`--expires-in-days` overrides it. `--never-expires` is available but must be
+asked for explicitly, and warns: such a credential stays valid until somebody
+notices it has leaked. An expired credential is refused exactly like a revoked
+one.
+
+## Rate limiting
+
+`enrol` and `identify` are limited per credential per window — a stolen token
+is the thing worth throttling, and callers behind one gateway should not
+throttle each other. A refusal is a structured **429** carrying `Retry-After`.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `FACEID_RATE_LIMIT_WINDOW_SECONDS` | `60` | Window length |
+| `FACEID_RATE_LIMIT_IDENTIFY` | `30` | Identifications per credential per window |
+| `FACEID_RATE_LIMIT_ENROL` | `120` | Enrolments per credential per window |
 
 | Scope | Grants |
 | --- | --- |

@@ -15,7 +15,7 @@ from app.api.v1.identifications import router as identification_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
-from app.connectors.redis import RedisConnector, RedisJobQueue
+from app.connectors.redis import RedisConnector, RedisJobQueue, RedisRateLimiter
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     redis = RedisConnector(str(settings.redis_dsn))
     app.state.redis = redis
     app.state.queue = RedisJobQueue(redis)
+    app.state.rate_limiter = RedisRateLimiter(redis)
     register_probe(redis.provider, redis.ping)
 
     objects = FilesystemObjectStore(settings.object_store_root)

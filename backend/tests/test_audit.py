@@ -223,6 +223,46 @@ class TestIdentificationStore:
         accept_at, review_at, version = row.one()
         assert (accept_at, review_at, version) == (0.62, 0.42, "test-v1")
 
+    async def test_an_identification_may_name_a_person_who_no_longer_exists(
+        self, connector: PostgresConnector
+    ) -> None:
+        """The vector store can still hold a candidate the database forgot.
+
+        A foreign key here used to turn that into a 500 on identification. An
+        identification is a historical record and must outlive the person it
+        named.
+        """
+        identification = uuid4()
+        async with connector.session() as session:
+            await SqlAlchemyIdentificationStore(session).add(
+                identification, "e" * 64, _decision(DecisionOutcome.ACCEPT, 0.9, uuid4())
+            )
+        async with connector.session() as session:
+            stored = await SqlAlchemyIdentificationStore(session).get(identification)
+        assert stored is not None
+        assert stored.decision.best is not None
+
+    async def test_a_recorded_identification_survives_deleting_its_person(
+        self, connector: PostgresConnector, known_person: Person
+    ) -> None:
+        identification = uuid4()
+        async with connector.session() as session:
+            await SqlAlchemyIdentificationStore(session).add(
+                identification,
+                "f" * 64,
+                _decision(DecisionOutcome.ACCEPT, 0.9, known_person.person_uuid),
+            )
+        async with connector.session() as session:
+            await session.execute(
+                text("DELETE FROM persons WHERE person_uuid = :u"),
+                {"u": str(known_person.person_uuid)},
+            )
+        async with connector.session() as session:
+            stored = await SqlAlchemyIdentificationStore(session).get(identification)
+        assert stored is not None
+        assert stored.decision.best is not None
+        assert stored.decision.best.person_uuid == known_person.person_uuid
+
     async def test_an_unknown_identification_is_none(self, connector: PostgresConnector) -> None:
         async with connector.session() as session:
             assert await SqlAlchemyIdentificationStore(session).get(uuid4()) is None

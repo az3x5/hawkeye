@@ -30,9 +30,16 @@ pytestmark = pytest.mark.skipif(
 DIMENSION = 512
 
 
+#: Deliberately not a real model name. These tests create and drop whole
+#: collections, and the collection name is derived from the provenance, so
+#: sharing a model name with the real recogniser would mean dropping the
+#: collection other tests are using.
+TEST_MODEL_NAME = "test_only_vector_model"
+
+
 def _provenance(**overrides: str) -> EmbeddingProvenance:
     values = {
-        "model_name": "adaface_ir101_webface12m",
+        "model_name": TEST_MODEL_NAME,
         "model_version": "a" * 64,
         "preprocessing_version": "scrfd-letterbox-arcface112-v1",
     }
@@ -69,7 +76,9 @@ async def connector() -> AsyncIterator[QdrantConnector]:
     # Drop every collection this run created, so tests never see each other's data.
     collections = await connector.client.get_collections()
     for description in collections.collections:
-        if description.name.startswith("face_embeddings__"):
+        # Only this suite's own collections: dropping anything else would
+        # delete data another test is relying on.
+        if description.name.startswith(f"face_embeddings__{TEST_MODEL_NAME}"):
             await connector.client.delete_collection(description.name)
     await connector.close()
 
@@ -96,7 +105,7 @@ class TestConnector:
 class TestCollectionNaming:
     def test_name_is_derived_from_the_provenance_triple(self) -> None:
         name = collection_name(_provenance())
-        assert name.startswith("face_embeddings__adaface_ir101_webface12m__")
+        assert name.startswith(f"face_embeddings__{TEST_MODEL_NAME}__")
         assert "scrfd_letterbox_arcface112_v1" in name
 
     def test_the_same_provenance_always_maps_to_the_same_collection(self) -> None:

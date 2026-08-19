@@ -14,8 +14,10 @@ import cv2
 import numpy as np
 import pytest
 import pytest_asyncio
+from qdrant_client import models
 
 from app.connectors.postgres import PostgresConnector, SqlAlchemyFaceSampleRepository
+from app.connectors.qdrant import collection_name
 from app.core.config import Settings
 from app.domain.jobs import EmbeddingJob, ProcessingState
 from app.domain.models import FaceSample, Person
@@ -244,9 +246,19 @@ class TestPipeline:
                 image_sha256=sample.image_sha256,
             )
         )
-        embedding = await worker._vectors.get(
-            sample.face_sample_uuid, worker._recognizer.provenance
+        # Counted directly rather than inferred from a search: identical
+        # photographs produce identical vectors, so a search is full of ties
+        # and says nothing about how many points were stored.
+        stored = await worker._qdrant.client.count(
+            collection_name=collection_name(worker._recognizer.provenance),
+            count_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="face_sample_uuid",
+                        match=models.MatchValue(value=str(sample.face_sample_uuid)),
+                    )
+                ]
+            ),
+            exact=True,
         )
-        assert embedding is not None
-        matches = await worker._vectors.search(embedding, limit=10)
-        assert [m.face_sample_uuid for m in matches].count(sample.face_sample_uuid) == 1
+        assert stored.count == 1

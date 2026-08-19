@@ -15,7 +15,7 @@ from app.api.v1.dependencies import (
     get_object_store,
 )
 from app.api.v1.enrolments import read_image_upload
-from app.api.v1.security import require
+from app.api.v1.security import rate_limited, require
 from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
@@ -151,13 +151,17 @@ def _candidate(candidate: Candidate) -> CandidateResponse:
         401: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
     },
 )
 async def create_identification(
     image: Annotated[UploadFile, File()],
     service: Annotated[IdentificationService, Depends(get_identification_service)],
-    principal: Annotated[Principal, Depends(require(Scope.IDENTIFY))],
+    principal: Annotated[
+        Principal,
+        Depends(rate_limited(Scope.IDENTIFY, "identify", lambda s: s.rate_limit_identify)),
+    ],
 ) -> IdentificationResponse:
     """Propose who a face belongs to, and record the attempt.
 

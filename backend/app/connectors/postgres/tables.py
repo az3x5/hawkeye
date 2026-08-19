@@ -190,6 +190,8 @@ api_tokens = Table(
     Column("scopes", ARRAY(String(32)), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("disabled_at", DateTime(timezone=True), nullable=True),
+    # NULL means the credential never expires: permitted, but rare by design.
+    Column("expires_at", DateTime(timezone=True), nullable=True),
     CheckConstraint("kind IN ('user', 'service')", name="ck_api_token_kind"),
     Index("ix_api_tokens_subject", "subject"),
     comment="API credentials. Secrets are never stored, only their SHA-256.",

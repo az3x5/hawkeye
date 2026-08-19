@@ -61,6 +61,21 @@ class Settings(BaseSettings):
         default=10, ge=1, le=100, description="Neighbours fetched per identification."
     )
 
+    # Rate limits, per credential per window. Configuration rather than
+    # constants: the right ceiling depends on how a deployment is used.
+    rate_limit_window_seconds: int = Field(default=60, ge=1)
+    rate_limit_identify: int = Field(
+        default=30, ge=1, description="Identifications allowed per credential per window."
+    )
+    rate_limit_enrol: int = Field(
+        default=120, ge=1, description="Enrolments allowed per credential per window."
+    )
+
+    # Credential lifetime applied when issuing a token without an explicit one.
+    token_lifetime_days: int = Field(
+        default=90, ge=1, description="Default lifetime for newly issued credentials."
+    )
+
     # Retention of submitted query images. The identification record and its
     # content hash outlive the image, so a decision stays auditable after the
     # biometric material is gone.

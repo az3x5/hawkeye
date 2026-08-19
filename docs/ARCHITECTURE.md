@@ -306,8 +306,11 @@ business answering it.
 Every identification and every review writes an append-only record capturing
 actor, action, subject, the policy in force and structured context.
 
-`audit_events` deliberately carries **no foreign keys**: an audit record must
-survive the deletion of what it describes, or it cannot evidence that deletion.
+`audit_events` and `identifications` deliberately carry **no foreign keys**: a
+record of what happened must survive the deletion of what it describes, or it
+cannot evidence that deletion. `identifications.best_person_uuid` did have one,
+and it turned a candidate the vector store still held but the metadata store
+had forgotten into a 500 at identification time.
 `SqlAlchemyAuditLog` exposes `record`, `for_person` and `for_identification` —
 there is no update and no delete, because a log that can be rewritten is not
 evidence. A test asserts that public surface exactly.
@@ -412,6 +415,30 @@ caller which they hold is information they have not earned.
 **Issuing is out of band**: `python -m app.tokens issue`. There is no endpoint
 for it, because an API that can mint its own credentials can escalate its own
 privileges.
+
+**Credentials expire.** A lifetime is applied at issue from
+`FACEID_TOKEN_LIFETIME_DAYS`; an expired credential is refused exactly as a
+revoked one is. Minting a credential with no end date is possible but must be
+asked for with `--never-expires`, and says plainly what that means: it stays
+valid until somebody notices it has leaked.
+
+### Rate limiting
+
+Fixed windows counted in Redis, keyed on the **credential** rather than the
+network address: a stolen token is the thing worth throttling, and callers
+behind one gateway should not throttle each other. Limits are configuration,
+because the right ceiling depends on how a deployment is used.
+
+A fixed window rather than a token bucket is a deliberate trade: a caller can
+send up to twice the limit across a boundary, which is acceptable for something
+that exists to stop a stolen credential probing the gallery at speed, not to
+shape traffic precisely. Refusals carry `Retry-After`, so a caller is told when
+to come back instead of retrying into the same wall. Authorisation is checked
+before counting, so a 403 does not consume a request.
+
+If no limiter is configured the endpoints **fail open** and log a warning:
+refusing real work because housekeeping is missing would be the worse failure,
+but an unlimited endpoint is worth noticing.
 
 **A service credential is recorded as a system actor.** It is not a person, and
 the audit log must never suggest a human judged anything.

@@ -11,7 +11,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.api.v1.dependencies import _postgres
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
-from app.core.errors import FaceIdError
+from app.connectors.redis import RateLimit
+from app.core.errors import FaceIdError, RateLimitedError
 from app.domain.auth import AuthorisationError, Principal, Scope, hash_token
 
 logger = logging.getLogger(__name__)
@@ -48,9 +49,9 @@ async def get_principal(
             hash_token(credentials.credentials)
         )
 
-    # A revoked credential and an unknown one are reported identically: telling
-    # a caller which one they hold is information they have not earned.
-    if token is None or not token.active:
+    # Unknown, revoked and expired credentials are reported identically:
+    # telling a caller which one they hold is information they have not earned.
+    if token is None or not token.usable():
         logger.warning("rejected an unusable credential")
         raise NotAuthenticatedError("the presented credential is not valid")
 
@@ -60,6 +61,51 @@ async def get_principal(
         kind=token.kind,
         scopes=token.scopes,
     )
+
+
+def rate_limited(
+    scope: Scope, action: str, limit_for: Callable[[Any], int]
+) -> Callable[..., Coroutine[Any, Any, Principal]]:
+    """Build a dependency enforcing ``scope`` and a per-credential rate limit.
+
+    The limit is keyed on the credential, not the network address: a stolen
+    token is the thing worth throttling, and callers behind one gateway should
+    not throttle each other.
+    """
+
+    async def dependency(
+        request: Request,
+        principal: Annotated[Principal, Depends(get_principal)],
+    ) -> Principal:
+        try:
+            principal.require(scope)
+        except AuthorisationError as exc:
+            raise NotAuthorisedError(str(exc)) from exc
+
+        limiter = getattr(request.app.state, "rate_limiter", None)
+        if limiter is None:
+            # No limiter configured: fail open rather than refuse real work,
+            # but say so, because an unlimited endpoint is worth noticing.
+            logger.warning("rate limiting is not configured", extra={"action": action})
+            return principal
+
+        settings = request.app.state.settings
+        verdict = await limiter.check(
+            str(principal.token_uuid),
+            action,
+            RateLimit(
+                limit=limit_for(settings),
+                window_seconds=settings.rate_limit_window_seconds,
+            ),
+        )
+        if not verdict.allowed:
+            raise RateLimitedError(
+                f"too many '{action}' requests; retry in {verdict.retry_after_seconds}s",
+                retry_after_seconds=verdict.retry_after_seconds,
+            )
+        return principal
+
+    return dependency
 
 
 def require(scope: Scope) -> Callable[[Principal], Coroutine[Any, Any, Principal]]:
