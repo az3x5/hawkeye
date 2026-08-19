@@ -453,8 +453,8 @@ needed to be usable at all.
 
 ### Deliberately NOT in Phase 7
 
-No authentication — the reviewer types their own name and nothing verifies it
-(see Known issues). No merge or split UI, no person browser, no enrolment UI,
+No authentication — **fixed in Phase 8**; at the time of Phase 7 the reviewer
+typed their own name and nothing verified it. No merge or split UI, no person browser, no enrolment UI,
 no pagination beyond a limit.
 
 ### Notes
@@ -476,3 +476,57 @@ no pagination beyond a limit.
   file pins `image: faceid-api:dev` so `docker compose up -d --no-build` uses
   it. This is an environment limitation, not a defect in the Dockerfile; on a
   normal host `docker compose up --build` works unchanged.
+
+## Phase 8 — Authentication, authorisation, retention — ✅ COMPLETE
+
+Closes the correctness gap Phase 7 left open: the audit log recorded a
+self-declared name, so it evidenced claims rather than people. Also settles the
+retention question that query-image storage opened.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Principals, scopes, token minting and hashing | `backend/app/domain/auth.py` |
+| Credential storage (hashes only) | `backend/app/connectors/postgres/tokens.py` |
+| Bearer authentication and scope dependency | `backend/app/api/v1/security.py` |
+| Scope enforcement on every endpoint | `backend/app/api/v1/{enrolments,identifications}.py` |
+| Out-of-band token administration | `backend/app/tokens.py` |
+| Query-image retention sweep | `backend/app/retention.py`, `backend/app/worker.py` |
+| `api_tokens` + revision `a1e093fc7216` | `backend/app/connectors/postgres/tables.py`, `backend/migrations/` |
+| Reviewer sign-in, session cookie, token forwarding | `frontend/src/{lib/session.ts,app/sign-in,app/sign-out}` |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| Every protected endpoint refuses an anonymous caller | live, no token | ✅ 401 `not_authenticated` |
+| An unknown or revoked token is refused | live and unit | ✅ 401, indistinguishable from each other |
+| Scopes are enforced, not merely recorded | live cross-checks | ✅ ingest→enrol 202, ingest→queue 403, reviewer→queue 200, reviewer→enrol 403 |
+| Health and readiness stay open | live | ✅ 200 without a token |
+| The reviewer is the authenticated principal | live review with `"reviewer":"mallory"` in the body | ✅ recorded as `alice@example.com` |
+| A service credential is never recorded as a person | audit inspection | ✅ `ingest-service` logged as `system` |
+| The secret is never stored | table inspection in tests | ✅ only its SHA-256 |
+| Revocation takes effect immediately | revoke then call | ✅ 401 on the next request |
+| An unknown scope name cannot lock anyone out | scope array corrupted in a test | ✅ unknown entries dropped |
+| Reviewers sign in with their own token | real browser: sign-in → queue → confirm | ✅ attributed to `alice@example.com` |
+| An unauthenticated visit redirects to sign-in | real browser | ✅ 307 → `/sign-in` |
+| Expired query images are purged | retention tests | ✅ removed after the cutoff |
+| Recent images are kept | retention test | ✅ |
+| The identification record outlives its image | retention test | ✅ hash retained |
+| An enrolled sample is never purged as a query | shared-hash test | ✅ kept |
+| Every purge is audited | audit inspection | ✅ `query_image_purged`, system actor |
+| The sweep cannot stall the worker | failure path logged and swallowed | ✅ no failures live |
+| Lint, types and tests clean | ruff, mypy --strict, pytest, tsc, eslint, vitest | ✅ 383 backend, 19 frontend |
+
+### Deliberately NOT in Phase 8
+
+No token expiry (revocation is manual), no rate limiting, no per-person access
+control — any `review` holder can see any identification. No merge/split, still.
+
+### Notes
+
+- The `reviewer` request field was **removed, not deprecated**. A test now
+  asserts that a name supplied in the body is ignored.
+- Vitest needed its own alias config to resolve `@/` the way the app does;
+  without it the proxy tests silently could not import the route.

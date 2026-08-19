@@ -19,6 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Link href="/" className="wordmark">
             Face&nbsp;ID <span>review</span>
           </Link>
+          <form action="/sign-out" method="post">
+            <button type="submit">Sign out</button>
+          </form>
         </header>
         <main>{children}</main>
       </body>

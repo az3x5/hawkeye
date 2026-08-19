@@ -61,6 +61,13 @@ class Settings(BaseSettings):
         default=10, ge=1, le=100, description="Neighbours fetched per identification."
     )
 
+    # Retention of submitted query images. The identification record and its
+    # content hash outlive the image, so a decision stays auditable after the
+    # biometric material is gone.
+    query_image_retention_days: int = Field(
+        default=30, ge=1, description="Days a submitted query image is retained."
+    )
+
     # Face detection. Weights are supplied per environment as a mounted file
     # and verified against a checksum; they are never committed or baked in.
     scrfd_model_path: Path | None = Field(

@@ -385,3 +385,55 @@ outcomes may be reviewed.
 
 **Biometric images** are served with `Cache-Control: private, no-store` at both
 the API and the proxy, and the page is marked `noindex, nofollow`.
+
+## 10. Authentication and authorisation
+
+Identity is **established, not asserted**. Before this existed, a reviewer
+typed their own name into a form and the audit log recorded whatever they
+typed, which made the log a record of claims rather than of people. The
+`reviewer` field is gone from the request body; the reviewer is the
+authenticated principal, and a name supplied in the body is ignored.
+
+**Credentials** are bearer tokens: 256 bits of randomness, prefixed `faceid_`,
+shown once at issue and stored only as a SHA-256. A disclosure of `api_tokens`
+therefore hands over no working credential. A plain hash rather than a password
+hash is deliberate — these are random secrets, not memorable passwords, so
+there is nothing for a slow hash to defend against and lookup runs per request.
+
+**Scopes** are narrow and separate: `enrol`, `identify`, `review`, `admin`. The
+service that submits enrolments has no business confirming identity decisions,
+and a reviewer has no business bulk-enrolling. Each endpoint demands one scope;
+`/health` and `/readyz` demand none, because a probe that needs a credential is
+a probe that fails for the wrong reasons.
+
+An unknown credential and a revoked one are reported identically — telling a
+caller which they hold is information they have not earned.
+
+**Issuing is out of band**: `python -m app.tokens issue`. There is no endpoint
+for it, because an API that can mint its own credentials can escalate its own
+privileges.
+
+**A service credential is recorded as a system actor.** It is not a person, and
+the audit log must never suggest a human judged anything.
+
+### The reviewer's session
+
+The review app holds no credential of its own. The reviewer signs in with
+*their* token, which is kept in an httpOnly, SameSite=strict cookie —
+unreadable by page scripts — and forwarded on every call. Reviews are therefore
+attributed to the person, not to the application.
+
+## 11. Retention
+
+Identification retains the submitted image so a reviewer can see what was
+actually judged. Keeping it forever is a separate decision, and not one to make
+silently: images expire after `FACEID_QUERY_IMAGE_RETENTION_DAYS`, swept hourly
+by the worker.
+
+The identification record and its content hash **outlive the image**, so a past
+decision stays auditable after the biometric material is gone. Every purge is
+itself audited.
+
+An image is never purged while an enrolled sample shares its content hash:
+enrolled faces are held under a different policy and must not be deleted
+because someone happened to identify against the same picture.

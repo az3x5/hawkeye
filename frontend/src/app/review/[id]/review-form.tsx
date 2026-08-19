@@ -12,7 +12,6 @@ import type { ReviewOutcome } from "@/lib/types";
  */
 export function ReviewForm({ identificationId }: { identificationId: string }) {
   const router = useRouter();
-  const [reviewer, setReviewer] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -22,7 +21,7 @@ export function ReviewForm({ identificationId }: { identificationId: string }) {
     const response = await fetch(`/api/v1/identifications/${identificationId}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outcome, reviewer, note: note.trim() === "" ? null : note }),
+      body: JSON.stringify({ outcome, note: note.trim() === "" ? null : note }),
     });
 
     if (!response.ok) {
@@ -39,7 +38,7 @@ export function ReviewForm({ identificationId }: { identificationId: string }) {
     startTransition(() => router.refresh());
   }
 
-  const canSubmit = reviewer.trim() !== "" && !pending;
+  const canSubmit = !pending;
 
   return (
     <form
@@ -48,18 +47,6 @@ export function ReviewForm({ identificationId }: { identificationId: string }) {
         event.preventDefault();
       }}
     >
-      <label>
-        Reviewer
-        <input
-          name="reviewer"
-          value={reviewer}
-          onChange={(event) => setReviewer(event.target.value)}
-          placeholder="you@example.com"
-          maxLength={256}
-          required
-        />
-      </label>
-
       <label>
         Note (optional)
         <textarea
@@ -92,8 +79,8 @@ export function ReviewForm({ identificationId }: { identificationId: string }) {
         </button>
       </div>
       <p className="notice">
-        Your decision is recorded against your name in an append-only audit log and cannot be
-        changed afterwards.
+        Your decision is recorded against the token you signed in with, in an append-only audit
+        log, and cannot be changed afterwards.
       </p>
     </form>
   );

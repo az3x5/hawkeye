@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import (
@@ -15,9 +15,10 @@ from app.api.v1.dependencies import (
     get_object_store,
 )
 from app.api.v1.enrolments import read_image_upload
+from app.api.v1.security import require
 from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
-from app.domain.audit import Actor
+from app.domain.auth import Principal, Scope
 from app.domain.identity import (
     Candidate,
     DecisionOutcome,
@@ -102,12 +103,14 @@ class IdentificationResponse(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    """A human's conclusion about an identification."""
+    """A human's conclusion about an identification.
+
+    Carries no reviewer field: the reviewer is the authenticated principal.
+    Accepting a self-declared name would make the audit log a record of claims
+    rather than of people.
+    """
 
     outcome: ReviewOutcome = Field(description="What the reviewer concluded.")
-    reviewer: str = Field(
-        min_length=1, max_length=256, description="Who reviewed it. Recorded in the audit log."
-    )
     note: str | None = Field(
         default=None, max_length=2000, description="Why, in the reviewer's words."
     )
@@ -144,12 +147,17 @@ def _candidate(candidate: Candidate) -> CandidateResponse:
     response_model=IdentificationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Identify a face",
-    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def create_identification(
     image: Annotated[UploadFile, File()],
     service: Annotated[IdentificationService, Depends(get_identification_service)],
-    actor: Annotated[str | None, Form(max_length=256)] = None,
+    principal: Annotated[Principal, Depends(require(Scope.IDENTIFY))],
 ) -> IdentificationResponse:
     """Propose who a face belongs to, and record the attempt.
 
@@ -162,7 +170,7 @@ async def create_identification(
         result = await service.identify(
             await service.embed_query(data),
             query_bytes=data,
-            actor=Actor(identifier=actor) if actor else None,
+            actor=principal.as_actor(),
         )
     except IdentificationError as exc:
         raise IdentificationFailedError(str(exc)) from exc
@@ -193,10 +201,16 @@ class ReviewQueueResponse(BaseModel):
     "/identifications",
     response_model=ReviewQueueResponse,
     summary="List identifications awaiting review",
-    responses={422: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def list_identifications(
     store: Annotated[IdentificationStore, Depends(get_identification_store)],
+    _principal: Annotated[Principal, Depends(require(Scope.REVIEW))],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> ReviewQueueResponse:
     """Return unreviewed proposals that asked for a human, oldest first."""
@@ -223,6 +237,8 @@ async def list_identifications(
     response_class=Response,
     responses={
         200: {"content": {"image/jpeg": {}}},
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
     },
@@ -231,6 +247,7 @@ async def read_identification_image(
     identification_uuid: UUID,
     store: Annotated[IdentificationStore, Depends(get_identification_store)],
     objects: Annotated[FilesystemObjectStore, Depends(get_object_store)],
+    _principal: Annotated[Principal, Depends(require(Scope.REVIEW))],
 ) -> Response:
     """Return the image that was submitted, so a reviewer can see it.
 
@@ -253,11 +270,17 @@ async def read_identification_image(
     "/identifications/{identification_uuid}",
     response_model=IdentificationResponse,
     summary="Read a recorded identification",
-    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def read_identification(
     identification_uuid: UUID,
     store: Annotated[IdentificationStore, Depends(get_identification_store)],
+    _principal: Annotated[Principal, Depends(require(Scope.REVIEW))],
 ) -> IdentificationResponse:
     """Return a past identification with the policy that produced it."""
     stored = await store.get(identification_uuid)
@@ -278,6 +301,8 @@ async def read_identification(
     response_model=IdentificationResponse,
     summary="Record a review decision",
     responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
@@ -287,6 +312,7 @@ async def review_identification(
     identification_uuid: UUID,
     body: ReviewRequest,
     service: Annotated[IdentificationService, Depends(get_identification_service)],
+    principal: Annotated[Principal, Depends(require(Scope.REVIEW))],
 ) -> IdentificationResponse:
     """Attach a human's conclusion to an identification that asked for one.
 
@@ -296,7 +322,7 @@ async def review_identification(
         stored = await service.review(
             identification_uuid,
             outcome=body.outcome,
-            reviewer=Actor(identifier=body.reviewer),
+            reviewer=principal.as_actor(),
             note=body.note,
         )
     except IdentificationError as exc:

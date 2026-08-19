@@ -22,7 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 
 metadata = MetaData()
@@ -175,4 +175,22 @@ audit_events = Table(
     # Deliberately carries no foreign keys: an audit record must survive the
     # deletion of what it describes, or it cannot evidence that deletion.
     comment="Append-only record of administrative and review actions.",
+)
+
+
+api_tokens = Table(
+    "api_tokens",
+    metadata,
+    Column("token_uuid", PgUUID(as_uuid=True), primary_key=True),
+    Column("subject", String(256), nullable=False),
+    Column("kind", String(16), nullable=False),
+    # Only the hash is stored: a disclosure of this table must not hand over
+    # working credentials.
+    Column("token_sha256", String(64), nullable=False, unique=True),
+    Column("scopes", ARRAY(String(32)), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("disabled_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint("kind IN ('user', 'service')", name="ck_api_token_kind"),
+    Index("ix_api_tokens_subject", "subject"),
+    comment="API credentials. Secrets are never stored, only their SHA-256.",
 )

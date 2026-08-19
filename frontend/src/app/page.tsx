@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ApiError, fetchReviewQueue } from "@/lib/api";
+import { redirect } from "next/navigation";
+import { ApiError, NotAuthenticatedError, fetchReviewQueue } from "@/lib/api";
 import { formatMargin, formatScore, formatTime, isNarrowMargin, shortId } from "@/lib/format";
 import type { ReviewQueue } from "@/lib/types";
 
@@ -10,6 +11,8 @@ export default async function ReviewQueuePage() {
   try {
     queue = await fetchReviewQueue();
   } catch (error) {
+    if (error instanceof NotAuthenticatedError) redirect("/sign-in");
+    if (error instanceof ApiError && error.status === 401) redirect("/sign-in");
     const message = error instanceof ApiError ? error.message : "The API is unreachable.";
     return (
       <>

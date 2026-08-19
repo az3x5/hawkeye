@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: () => ({ value: "faceid_test-token" }) }),
+}));
 import { ApiError, fetchIdentification, fetchReviewQueue, submitReview } from "../api";
 
 function mockFetch(status: number, body: unknown) {
@@ -35,11 +39,11 @@ describe("error handling", () => {
       error: { code: "review_not_permitted", message: "already reviewed", field: null },
       details: [],
     });
-    await expect(submitReview("abc", { outcome: "confirmed", reviewer: "alice" })).rejects.toThrow(
+    await expect(submitReview("abc", { outcome: "confirmed" })).rejects.toThrow(
       ApiError,
     );
     try {
-      await submitReview("abc", { outcome: "confirmed", reviewer: "alice" });
+      await submitReview("abc", { outcome: "confirmed" });
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
       expect((error as ApiError).code).toBe("review_not_permitted");
@@ -60,12 +64,11 @@ describe("error handling", () => {
 describe("submitReview", () => {
   it("posts the reviewer and outcome as JSON", async () => {
     const fetchMock = mockFetch(200, {});
-    await submitReview("abc", { outcome: "rejected", reviewer: "bob", note: "not the same" });
+    await submitReview("abc", { outcome: "rejected", note: "not the same" });
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
       outcome: "rejected",
-      reviewer: "bob",
       note: "not the same",
     });
   });
@@ -89,5 +92,23 @@ describe("proxy allowlist", () => {
       }),
     });
     expect(refused.status).toBe(404);
+  });
+});
+
+describe("authentication", () => {
+  it("sends the reviewer's own token, not a shared credential", async () => {
+    const fetchMock = mockFetch(200, { items: [], count: 0 });
+    await fetchReviewQueue();
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer faceid_test-token",
+    );
+  });
+
+  it("never sends a reviewer name in the body", async () => {
+    const fetchMock = mockFetch(200, {});
+    await submitReview("abc", { outcome: "confirmed", note: "same person" });
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("reviewer");
   });
 });

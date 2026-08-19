@@ -12,6 +12,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { readToken } from "@/lib/session";
 
 const BASE_URL = () => process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
 
@@ -39,12 +40,29 @@ function refuse(): NextResponse {
 async function forward(request: Request, path: string, allowed: RegExp[]): Promise<Response> {
   if (!allowed.some((pattern) => pattern.test(path))) return refuse();
 
+  // The reviewer's own credential, never one belonging to this app: the API
+  // attributes the action to them.
+  const token = await readToken();
+  if (token === null) {
+    return NextResponse.json(
+      {
+        error: { code: "not_authenticated", message: "Sign in to continue.", field: null },
+        details: [],
+      },
+      { status: 401 },
+    );
+  }
+
   const upstream = await fetch(`${BASE_URL()}/api/v1/${path}`, {
     method: request.method,
     headers:
       request.method === "POST"
-        ? { "Content-Type": "application/json", Accept: "application/json" }
-        : { Accept: "image/jpeg" },
+        ? {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          }
+        : { Accept: "image/jpeg", Authorization: `Bearer ${token}` },
     body: request.method === "POST" ? await request.text() : undefined,
     cache: "no-store",
   });

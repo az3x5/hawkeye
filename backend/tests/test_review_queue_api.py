@@ -21,6 +21,7 @@ from app.api.v1.identifications import router as identification_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.filesystem.object_store import sha256_bytes
 from app.core.errors import ErrorResponse, install_error_handlers
+from app.domain.auth import Scope
 from app.domain.identity import (
     Candidate,
     DecisionOutcome,
@@ -30,6 +31,8 @@ from app.domain.identity import (
     StoredIdentification,
 )
 from app.domain.models import FaceSample
+
+from .conftest import authenticate
 
 POLICY = DecisionThresholds(accept_at=0.62, review_at=0.42, policy_version="queue-test-v1")
 QUERY_IMAGE = b"\xff\xd8\xff-the-submitted-query"
@@ -130,6 +133,7 @@ def client(
     app.dependency_overrides[get_identification_store] = lambda: store
     app.dependency_overrides[get_sample_reader] = lambda: samples
     app.dependency_overrides[get_object_store] = lambda: objects
+    authenticate(app, Scope.ENROL, Scope.REVIEW)
     with TestClient(app) as test_client:
         yield test_client
 

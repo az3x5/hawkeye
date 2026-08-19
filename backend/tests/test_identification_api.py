@@ -16,6 +16,7 @@ from app.api.v1.dependencies import get_identification_service, get_identificati
 from app.api.v1.identifications import router as identification_router
 from app.core.errors import ErrorResponse, install_error_handlers
 from app.domain.audit import AuditEvent
+from app.domain.auth import Scope
 from app.domain.identity import (
     Candidate,
     DecisionOutcome,
@@ -26,6 +27,8 @@ from app.domain.identity import (
 )
 from app.domain.recognition import EmbeddingProvenance, FaceEmbedding
 from app.services.identification import IdentificationError, IdentificationResult
+
+from .conftest import authenticate
 
 POLICY = DecisionThresholds(accept_at=0.62, review_at=0.42, policy_version="api-test-v1")
 JPEG = ("query.jpg", b"\xff\xd8\xff-query-bytes", "image/jpeg")
@@ -144,6 +147,7 @@ def client(service: FakeService, store: FakeStore) -> Iterator[TestClient]:
     app.include_router(identification_router, prefix="/api/v1")
     app.dependency_overrides[get_identification_service] = lambda: service
     app.dependency_overrides[get_identification_store] = lambda: store
+    authenticate(app, Scope.IDENTIFY, Scope.REVIEW, subject="alice")
     with TestClient(app) as test_client:
         yield test_client
 
@@ -255,7 +259,7 @@ class TestReview:
     def test_a_reviewer_can_confirm(self, client: TestClient, review_case: str) -> None:
         response = client.post(
             f"/api/v1/identifications/{review_case}/review",
-            json={"outcome": "confirmed", "reviewer": "alice", "note": "clear match"},
+            json={"outcome": "confirmed", "note": "clear match"},
         )
         assert response.status_code == 200
         body = response.json()
@@ -266,12 +270,12 @@ class TestReview:
     def test_a_reviewer_can_reject(self, client: TestClient, review_case: str) -> None:
         response = client.post(
             f"/api/v1/identifications/{review_case}/review",
-            json={"outcome": "rejected", "reviewer": "bob"},
+            json={"outcome": "rejected"},
         )
         assert response.json()["review_outcome"] == "rejected"
 
     def test_reviewing_twice_conflicts(self, client: TestClient, review_case: str) -> None:
-        payload = {"outcome": "confirmed", "reviewer": "alice"}
+        payload = {"outcome": "confirmed"}
         client.post(f"/api/v1/identifications/{review_case}/review", json=payload)
         response = client.post(f"/api/v1/identifications/{review_case}/review", json=payload)
         assert response.status_code == 409
@@ -282,7 +286,7 @@ class TestReview:
         accepted = _identify(client).json()["identification_uuid"]
         response = client.post(
             f"/api/v1/identifications/{accepted}/review",
-            json={"outcome": "confirmed", "reviewer": "alice"},
+            json={"outcome": "confirmed"},
         )
         assert response.status_code == 409
         assert (
@@ -299,7 +303,7 @@ class TestReview:
         """
         response = client.post(
             f"/api/v1/identifications/{review_case}/review",
-            json={"outcome": "confirmed", "reviewer": "alice", "note": "same person"},
+            json={"outcome": "confirmed", "note": "same person"},
         )
         body = response.json()
         assert body["review_outcome"] == "confirmed"
@@ -310,25 +314,36 @@ class TestReview:
     def test_reviewing_an_unknown_identification_is_404(self, client: TestClient) -> None:
         response = client.post(
             f"/api/v1/identifications/{uuid4()}/review",
-            json={"outcome": "confirmed", "reviewer": "alice"},
+            json={"outcome": "confirmed"},
         )
         assert response.status_code == 404
 
-    def test_a_reviewer_is_required(self, client: TestClient, review_case: str) -> None:
+    def test_the_reviewer_is_the_authenticated_principal(
+        self, client: TestClient, review_case: str
+    ) -> None:
+        """Not a self-declared name: the log must record people, not claims."""
         response = client.post(
             f"/api/v1/identifications/{review_case}/review", json={"outcome": "confirmed"}
         )
-        assert response.status_code == 422
-        body = ErrorResponse.model_validate(response.json())
-        assert body.error.code == "validation_error"
-        assert "reviewer" in {d.field for d in body.details}
+        assert response.status_code == 200
+        assert response.json()["reviewed_by"] == "alice"
+
+    def test_a_reviewer_named_in_the_body_is_ignored(
+        self, client: TestClient, review_case: str
+    ) -> None:
+        response = client.post(
+            f"/api/v1/identifications/{review_case}/review",
+            json={"outcome": "confirmed", "reviewer": "mallory"},
+        )
+        assert response.status_code == 200
+        assert response.json()["reviewed_by"] == "alice"
 
     def test_an_unknown_outcome_fails_validation(
         self, client: TestClient, review_case: str
     ) -> None:
         response = client.post(
             f"/api/v1/identifications/{review_case}/review",
-            json={"outcome": "maybe", "reviewer": "alice"},
+            json={"outcome": "maybe"},
         )
         assert response.status_code == 422
 

@@ -20,6 +20,7 @@ class AuditAction(StrEnum):
 
     IDENTIFICATION_PERFORMED = "identification_performed"
     IDENTIFICATION_REVIEWED = "identification_reviewed"
+    QUERY_IMAGE_PURGED = "query_image_purged"
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,17 +19,23 @@ from app.adapters.factory import build_detector, build_recognizer
 from app.adapters.preprocessing import UInt8Array
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector, SqlAlchemyFaceSampleRepository
+from app.connectors.postgres.audit import SqlAlchemyAuditLog
 from app.connectors.qdrant import QdrantConnector, QdrantVectorRepository
 from app.connectors.redis import RedisConnector, RedisJobQueue
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.domain.jobs import EmbeddingJob
 from app.domain.vectors import StoredEmbedding
+from app.retention import purge_expired_query_images
 
 logger = logging.getLogger(__name__)
 
 #: How long a reserve() call waits before looping, so shutdown stays responsive.
 RESERVE_TIMEOUT_SECONDS = 5
+
+#: How often expired query images are swept. Retention is a policy measured in
+#: days, so sweeping hourly is ample and keeps the worker's main job first.
+PURGE_INTERVAL_SECONDS = 3600
 
 
 class JobFailure(Exception):
@@ -51,6 +57,7 @@ class EmbeddingWorker:
         self._queue = RedisJobQueue(self._redis)
         self._vectors = QdrantVectorRepository(self._qdrant)
         self._stopping = asyncio.Event()
+        self._last_purge = 0.0
 
     async def start(self) -> None:
         """Load models and verify every dependency before taking work."""
@@ -81,12 +88,34 @@ class EmbeddingWorker:
         await self._postgres.close()
 
     async def run(self) -> None:
-        """Process jobs until asked to stop."""
+        """Process jobs until asked to stop, sweeping expired images between them."""
         while not self._stopping.is_set():
+            await self._maybe_purge()
             job = await self._queue.reserve(timeout_seconds=RESERVE_TIMEOUT_SECONDS)
             if job is None:
                 continue
             await self.process(job)
+
+    async def _maybe_purge(self) -> None:
+        """Run the retention sweep if it is due.
+
+        Failures are logged and swallowed: retention housekeeping must never
+        stop the worker from embedding faces.
+        """
+        now = asyncio.get_running_loop().time()
+        if now - self._last_purge < PURGE_INTERVAL_SECONDS:
+            return
+        self._last_purge = now
+        try:
+            async with self._postgres.session() as session:
+                await purge_expired_query_images(
+                    session=session,
+                    objects=self._objects,
+                    audit=SqlAlchemyAuditLog(session),
+                    retention_days=self._settings.query_image_retention_days,
+                )
+        except Exception:  # noqa: BLE001 - logged; the sweep retries next hour
+            logger.exception("retention sweep failed")
 
     async def process(self, job: EmbeddingJob) -> None:
         """Handle one job, recording the outcome in both the queue and the database."""

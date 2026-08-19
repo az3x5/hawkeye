@@ -14,9 +14,11 @@ from app.api.v1.dependencies import get_enrolment_service, get_sample_reader
 from app.api.v1.enrolments import MAX_IMAGE_BYTES
 from app.api.v1.enrolments import router as enrolment_router
 from app.core.errors import ErrorResponse, install_error_handlers
+from app.domain.auth import Scope
 from app.domain.jobs import ProcessingState
 from app.services.enrolment import EnrolmentService, SampleReader
 
+from .conftest import authenticate
 from .test_enrolment_service import (
     IMAGE,
     FakeObjects,
@@ -50,6 +52,7 @@ def client(
 
     app.dependency_overrides[get_enrolment_service] = _service
     app.dependency_overrides[get_sample_reader] = _reader
+    authenticate(app, Scope.ENROL, Scope.REVIEW)
     with TestClient(app) as test_client:
         yield test_client
 

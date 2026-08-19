@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ReviewForm } from "@/app/review/[id]/review-form";
-import { ApiError, fetchIdentification } from "@/lib/api";
+import { ApiError, NotAuthenticatedError, fetchIdentification } from "@/lib/api";
 import { formatMargin, formatScore, formatTime, isNarrowMargin, shortId } from "@/lib/format";
 import type { Identification } from "@/lib/types";
 
@@ -14,6 +14,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   try {
     identification = await fetchIdentification(id);
   } catch (error) {
+    if (error instanceof NotAuthenticatedError) redirect("/sign-in");
+    if (error instanceof ApiError && error.status === 401) redirect("/sign-in");
     if (error instanceof ApiError && error.status === 404) notFound();
     const message = error instanceof ApiError ? error.message : "The API is unreachable.";
     return (

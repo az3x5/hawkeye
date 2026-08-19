@@ -5,6 +5,7 @@
  * internal network and is never exposed to the reviewer's browser.
  */
 
+import { readToken } from "./session";
 import type { ApiErrorBody, Identification, ReviewOutcome, ReviewQueue } from "./types";
 
 const BASE_URL = process.env.FACEID_API_URL ?? "http://127.0.0.1:8000";
@@ -31,10 +32,24 @@ function isErrorBody(value: unknown): value is ApiErrorBody {
   );
 }
 
+export class NotAuthenticatedError extends Error {
+  constructor() {
+    super("Sign in with your review token to continue.");
+    this.name = "NotAuthenticatedError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await readToken();
+  if (token === null) throw new NotAuthenticatedError();
+
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
-    headers: { Accept: "application/json", ...init?.headers },
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+      ...init?.headers,
+    },
     // A review queue that shows stale state is worse than a slow one.
     cache: "no-store",
   });
@@ -62,7 +77,7 @@ export function fetchIdentification(id: string): Promise<Identification> {
 /** Record a reviewer's conclusion. */
 export function submitReview(
   id: string,
-  body: { outcome: ReviewOutcome; reviewer: string; note?: string },
+  body: { outcome: ReviewOutcome; note?: string },
 ): Promise<Identification> {
   return request<Identification>(`/api/v1/identifications/${id}/review`, {
     method: "POST",

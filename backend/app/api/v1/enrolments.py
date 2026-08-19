@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import (
@@ -14,8 +14,10 @@ from app.api.v1.dependencies import (
     get_object_store,
     get_sample_reader,
 )
+from app.api.v1.security import require
 from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
+from app.domain.auth import Principal, Scope
 from app.domain.jobs import ProcessingState
 from app.domain.models import DomainValidationError
 from app.services.enrolment import (
@@ -126,16 +128,18 @@ async def read_image_upload(upload: UploadFile) -> bytes:
     status_code=status.HTTP_202_ACCEPTED,
     summary="Enrol a face sample",
     responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         409: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
     },
 )
 async def create_enrolment(
-    request: Request,
     source: Annotated[str, Form(min_length=1, max_length=128)],
     image: Annotated[UploadFile, File()],
     service: Annotated[EnrolmentService, Depends(get_enrolment_service)],
+    _principal: Annotated[Principal, Depends(require(Scope.ENROL))],
     external_id: Annotated[str | None, Form(max_length=256)] = None,
     local_id: Annotated[str | None, Form(max_length=256)] = None,
     captured_at: Annotated[datetime | None, Form()] = None,
@@ -169,6 +173,8 @@ async def create_enrolment(
     response_class=Response,
     responses={
         200: {"content": {"image/jpeg": {}}},
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         503: {"model": ErrorResponse},
     },
@@ -177,6 +183,7 @@ async def read_face_sample_image(
     face_sample_uuid: UUID,
     reader: Annotated[SampleReader, Depends(get_sample_reader)],
     objects: Annotated[FilesystemObjectStore, Depends(get_object_store)],
+    _principal: Annotated[Principal, Depends(require(Scope.REVIEW))],
 ) -> Response:
     """Return an enrolled image so a reviewer can compare it with a query.
 
@@ -199,11 +206,17 @@ async def read_face_sample_image(
     "/face-samples/{face_sample_uuid}",
     response_model=FaceSampleResponse,
     summary="Read the state of a face sample",
-    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
 )
 async def read_face_sample(
     face_sample_uuid: UUID,
     reader: Annotated[SampleReader, Depends(get_sample_reader)],
+    _principal: Annotated[Principal, Depends(require(Scope.ENROL))],
 ) -> FaceSampleResponse:
     """Return one face sample, including whether it has been embedded yet."""
     sample = await reader.get(face_sample_uuid)

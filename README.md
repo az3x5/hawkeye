@@ -3,9 +3,10 @@
 Face detection, recognition and identity resolution for the multimodal Person
 Intelligence platform.
 
-**Status: Phase 7 (review frontend) complete.** All seven phases are built:
-faces can be enrolled, detected, embedded, identified, decided on and reviewed
-through a web UI, with every decision audited — see
+**Status: Phase 8 (authentication, authorisation, retention) complete.** Every
+endpoint requires a scoped bearer token, decisions are attributed to the
+authenticated principal rather than a typed name, and submitted images expire
+on a configured schedule — see
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
 is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 design the phases build toward.
@@ -165,7 +166,9 @@ Install CPU-only torch; the default index ships multi-GB CUDA wheels:
 
 ## Review frontend
 
-A Next.js app on `127.0.0.1:3000` showing the queue of proposals the system
+A Next.js app on `127.0.0.1:3000`. Reviewers sign in with their own token,
+held in an httpOnly cookie, so every decision is attributed to them and not to
+the app. It shows the queue of proposals the system
 declined to decide alone, each with the query image beside every candidate's
 best-matching sample, the scores, the margin, and the thresholds in force.
 
@@ -211,7 +214,7 @@ No credential is defaulted in code and `.env` is git-ignored.
 Enrol a face:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8000/api/v1/enrolments -F source=crm -F external_id=42 -F image=@face.jpg
+curl -sS -X POST http://127.0.0.1:8000/api/v1/enrolments -H "Authorization: Bearer $TOKEN" -F source=crm -F external_id=42 -F image=@face.jpg
 ```
 
 The response carries `person_uuid`, the sample, and `created` — `false` means
@@ -220,6 +223,39 @@ Embedding happens in the `worker` service; poll the face-sample endpoint until
 `processing_state` leaves `pending`.
 
 Interactive docs are served at `/docs` in the `local` environment only.
+
+## Authentication
+
+Every endpoint except `/health` and `/readyz` requires a bearer token with the
+right scope. Tokens are issued out of band — there is no self-service
+registration, because an API that can mint its own credentials can escalate its
+own privileges:
+
+```bash
+docker compose exec api python -m app.tokens issue --subject alice@example.com --kind user --scope review
+```
+
+The secret is printed once and stored only as a SHA-256; it is not recoverable.
+`list` and `revoke <token-uuid>` manage them, and revocation takes effect on the
+next request.
+
+| Scope | Grants |
+| --- | --- |
+| `enrol` | submit enrolments, read sample state |
+| `identify` | submit identifications |
+| `review` | read the queue, read decisions and images, record reviews |
+| `admin` | reserved for administrative actions |
+
+Reviews are attributed to the authenticated principal. A `reviewer` name in the
+request body is ignored — the audit log records people, not claims.
+
+## Retention
+
+Submitted identification images expire after
+`FACEID_QUERY_IMAGE_RETENTION_DAYS` (default 30), swept hourly by the worker.
+The identification record and its content hash outlive the image, so decisions
+stay auditable after the biometric material is gone, and every purge is
+audited. An image shared with an enrolled sample is never purged this way.
 
 ## Identity decisions
 
@@ -238,7 +274,7 @@ The values in `.env.example` are illustrative starting points, **not validated
 operating values** — tune them against your own population first.
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications -F image=@face.jpg
+curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications -H "Authorization: Bearer $TOKEN" -F image=@face.jpg
 ```
 
 The response carries `outcome` (`accept` / `review` / `reject`), the candidates
@@ -249,7 +285,7 @@ and `accept` is a proposal to act, not a determination of identity.
 Only proposals with outcome `review` can be reviewed, and only once:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications/$ID/review -H 'Content-Type: application/json' -d '{"outcome":"confirmed","reviewer":"alice@example.com","note":"same person"}'
+curl -sS -X POST http://127.0.0.1:8000/api/v1/identifications/$ID/review -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"outcome":"confirmed","note":"same person"}'
 ```
 
 Every identification and review is written to an append-only audit log with the
@@ -264,4 +300,5 @@ actor, the policy in force, and the scores involved.
 | `face_samples` | many captures per person, deduplicated per person by content hash, with processing state |
 | `face_embeddings` | what was embedded, under which model provenance, into which collection |
 | `identifications` | each attempt, its decision, and the thresholds in force at the time |
-| `audit_events` | append-only record of decisions and reviews; no foreign keys, so it outlives what it describes |
+| `audit_events` | append-only record of decisions, reviews and purges; no foreign keys, so it outlives what it describes |
+| `api_tokens` | credentials, stored only as SHA-256 hashes, with scopes |

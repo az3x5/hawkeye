@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.health import router as health_router
+from app.api.v1.security import get_principal
 from app.core.config import Settings
 from app.core.errors import install_error_handlers
 from app.core.readiness import clear_probes
+from app.domain.auth import Principal, Scope
 from app.main import create_app
 
 #: Integration tests run only when a real database is pointed at explicitly.
@@ -64,3 +67,21 @@ def client(probe_app: FastAPI) -> Iterator[TestClient]:
     """HTTP client for contract tests that need no storage."""
     with TestClient(probe_app) as test_client:
         yield test_client
+
+
+def authenticate(
+    app: FastAPI, *scopes: Scope, subject: str = "tester@example.com", kind: str = "user"
+) -> Principal:
+    """Give an app a fixed authenticated principal, for endpoint contract tests.
+
+    Authentication itself is covered in ``test_auth.py``; tests of *other*
+    endpoints should not have to mint credentials to reach them.
+    """
+    principal = Principal(
+        token_uuid=uuid4(),
+        subject=subject,
+        kind=kind,
+        scopes=frozenset(scopes),
+    )
+    app.dependency_overrides[get_principal] = lambda: principal
+    return principal
