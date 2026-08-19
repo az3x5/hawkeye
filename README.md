@@ -225,6 +225,9 @@ Embedding happens in the `worker` service; poll the face-sample endpoint until
 
 Interactive docs are served at `/docs` in the `local` environment only.
 
+Worked `curl` examples for every endpoint:
+[docs/API_EXAMPLES.md](docs/API_EXAMPLES.md).
+
 ## Authentication
 
 Every endpoint except `/health`, `/readyz` and `/sessions` requires a bearer
