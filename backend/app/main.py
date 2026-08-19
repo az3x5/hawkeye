@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from app.adapters.factory import build_detector, build_recognizer
 from app.api.v1.administration import router as administration_router
+from app.api.v1.browse import router as browse_router
 from app.api.v1.enrolments import router as enrolment_router
 from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
@@ -119,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(me_router, prefix=settings.api_v1_prefix)
     app.include_router(session_router, prefix=settings.api_v1_prefix)
     app.include_router(administration_router, prefix=settings.api_v1_prefix)
+    app.include_router(browse_router, prefix=settings.api_v1_prefix)
     return app
 
 

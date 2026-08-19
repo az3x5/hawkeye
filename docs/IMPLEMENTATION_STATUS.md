@@ -791,3 +791,50 @@ access to the container.
 - No UI for administration; it is API and CLI only.
 - No per-person access control; no merge/split; thresholds unvalidated; model
   weight provenance unresolved.
+
+## Phase 14 — Read APIs — ✅ COMPLETE
+
+Records the system already kept but could not show. Four read-only endpoints,
+each paginated, each scoped.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Read-side queries (aggregate, paginate, join) | `backend/app/connectors/postgres/queries.py` |
+| `GET /persons`, `GET /persons/{uuid}` | `backend/app/api/v1/browse.py` |
+| `GET /identification-history` | same |
+| `GET /audit-events` | same |
+| `GET /statistics` | same |
+
+### Acceptance criteria — verified
+
+| Criterion | How verified | Result |
+| --- | --- | --- |
+| People list with samples and identifiers | integration tests | ✅ counts and identifiers correct |
+| Search matches a uuid or an external identifier | integration tests | ✅ |
+| Pagination reports the full total | integration test | ✅ 2 total, 1 returned |
+| Invalid paging is refused | parametrised | ✅ 422 |
+| One person reads back with their samples | integration test | ✅ |
+| History includes what the review queue excludes | integration test | ✅ decided identifications visible |
+| History filters by outcome, review state and person | integration tests | ✅ |
+| Audit lists most recent first with its actions | integration tests | ✅ |
+| Audit filters by action, actor and person | integration tests | ✅ |
+| A system actor stays distinguishable from a person | integration test | ✅ |
+| Nothing can change an audit event | POST and DELETE attempted | ✅ 405 |
+| Statistics are real counts | integration test | ✅ matches seeded data |
+| An empty system reports zeroes | integration test | ✅ not an error |
+| Browsing needs `review`; audit needs `admin` | scope tests | ✅ 403 otherwise |
+| Lint, types and tests clean | ruff, mypy --strict, pytest | ✅ 529 passed |
+
+### Notes
+
+- `/identification-history` is separate from `/identifications` rather than a
+  flag on it. The queue's contract — unreviewed proposals only — is relied on
+  by the review screen, and overloading it would have made the default
+  behaviour depend on a parameter's absence.
+- Statistics are **counts only**. No rates, trends or indicators, because those
+  need a time series the system does not keep, and a plausible-looking trend
+  line would be an invention.
+- The audit log gained a read endpoint but no write, edit or delete. It stays
+  append-only by construction.

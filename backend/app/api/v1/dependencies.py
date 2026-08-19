@@ -18,6 +18,7 @@ from app.connectors.postgres import (
     SqlAlchemyPersonRepository,
 )
 from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
+from app.connectors.postgres.queries import ReadQueries
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
 from app.connectors.postgres.users import SqlAlchemyUserStore
 from app.connectors.qdrant import QdrantVectorRepository
@@ -129,6 +130,12 @@ async def get_token_administration(request: Request) -> AsyncIterator[TokenAdmin
         yield TokenAdministration(
             tokens=SqlAlchemyTokenStore(session), audit=SqlAlchemyAuditLog(session)
         )
+
+
+async def get_read_queries(request: Request) -> AsyncIterator[ReadQueries]:
+    """Build read-side queries bound to one database transaction."""
+    async with _postgres(request).session() as session:
+        yield ReadQueries(session)
 
 
 async def get_authentication_service(
