@@ -192,6 +192,30 @@ Checks:
 cd frontend && npm run typecheck && npm run lint && npm test
 ```
 
+## Deploying
+
+Work locally, push to `main`, and the deployment pulls what CI built.
+
+1. **CI** (`.github/workflows/ci.yml`) runs lint, types and tests on every push
+   and pull request, against real Postgres, Redis and Qdrant. Tests needing
+   model weights skip — the weights are not in git.
+2. **Publish** (`.github/workflows/publish.yml`) builds `hawkeye-api` and
+   `hawkeye-review` and pushes them to GHCR, but only from `main` and only when
+   CI passed on that same commit.
+3. **Deploy** on the host:
+
+```bash
+cd ~/hawkeye && ./scripts/deploy.sh
+```
+
+That pulls the code, pulls the images, applies migrations before the new
+containers serve traffic, restarts, and waits for `/readyz`. Pin a specific
+build with `HAWKEYE_TAG=<commit-sha> ./scripts/deploy.sh`.
+
+A deployment needs two things that are deliberately not in git: its own `.env`,
+and the model weights in `models/` verified against the checksums in
+`.env.example`.
+
 ## Configuration
 
 All settings come from the environment with the `FACEID_` prefix (see

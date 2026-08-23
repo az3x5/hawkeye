@@ -1,0 +1,99 @@
+name: CI
+
+# Every push and every pull request. The images published from main are only
+# as trustworthy as the checks that ran before them, so publishing depends on
+# this workflow passing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hawkeye
+          POSTGRES_PASSWORD: ci-not-a-secret
+          POSTGRES_DB: hawkeye_test
+        options: >-
+          --health-cmd "pg_isready -U hawkeye"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+        ports: ["5432:5432"]
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+        ports: ["6379:6379"]
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports: ["6333:6333"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        working-directory: backend
+        # CPU torch: the default index ships multi-gigabyte CUDA wheels that a
+        # runner has no use for.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -e '.[dev]'
+
+      - name: Lint
+        working-directory: backend
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Types
+        working-directory: backend
+        run: mypy
+
+      - name: Tests
+        working-directory: backend
+        # Tests needing model weights skip: the weights are ~277MB, are not in
+        # git, and their licensing is unresolved. What runs here is everything
+        # that does not need them, against real Postgres, Redis and Qdrant.
+        env:
+          FACEID_TEST_POSTGRES_DSN: postgresql://hawkeye:ci-not-a-secret@localhost:5432/hawkeye_test
+          FACEID_TEST_REDIS_DSN: redis://localhost:6379/15
+          FACEID_TEST_QDRANT_URL: http://localhost:6333
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm test
+      - name: Build
+        # The build needs an API address to exist, not to be reachable.
+        env:
+          FACEID_API_URL: http://api:8000
+        run: npm run build

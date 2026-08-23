@@ -1,0 +1,25 @@
+# Run published images instead of building from source.
+#
+# Used on deployments: the server pulls what CI built and published rather than
+# compiling it, so what runs there is the artefact that passed the checks —
+# not a rebuild that happens to come from the same commit.
+#
+# HAWKEYE_TAG names the version. `latest` follows main; a commit sha pins a
+# deployment to exactly one build, which is what you want when something has
+# gone wrong and you need to know precisely what is running.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml \
+#                  -f docker-compose.ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml \
+#                  -f docker-compose.ghcr.yml up -d
+services:
+  api:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+
+  worker:
+    image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+
+  frontend:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-review:${HAWKEYE_TAG:-latest}
