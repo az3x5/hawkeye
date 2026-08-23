@@ -1,5 +1,5 @@
 /**
- * Types mirroring the Face ID API's response schemas.
+ * Types mirroring the Hawkeye API's response schemas.
  *
  * Scores are raw cosine similarities in [-1, 1]. They are not probabilities
  * and must never be rendered as percentages or as "confidence".

@@ -54,7 +54,7 @@ class Actor:
 
 #: The service acting on its own behalf, e.g. an automatic decision. Kept
 #: distinct from any human so the log can never blur the two.
-SYSTEM_ACTOR = Actor(identifier="faceid", kind="system")
+SYSTEM_ACTOR = Actor(identifier="hawkeye", kind="system")
 
 
 @dataclass(frozen=True, slots=True)

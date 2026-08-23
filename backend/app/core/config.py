@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     )
 
     environment: Literal["local", "test", "staging", "production"] = "local"
-    service_name: str = "faceid"
+    service_name: str = "hawkeye"
     api_v1_prefix: str = "/api/v1"
 
     # Stateful dependencies. Required — no in-code fallbacks, no embedded

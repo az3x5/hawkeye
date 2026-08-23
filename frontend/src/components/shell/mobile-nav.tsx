@@ -31,7 +31,7 @@ export function MobileNav() {
       <SheetContent side="left" className="w-72 border-line bg-surface p-0">
         <SheetHeader className="border-b border-line px-4 py-3.5">
           <SheetTitle className="text-left text-sm font-semibold text-ink">
-            Face ID
+            Hawkeye
           </SheetTitle>
         </SheetHeader>
         <div className="overflow-y-auto p-3">

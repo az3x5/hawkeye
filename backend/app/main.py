@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # app object is built, so this must happen at startup, not import time.
     configure_logging(logging.DEBUG if settings.debug else logging.INFO)
     logger.info(
-        "faceid service starting",
+        "hawkeye service starting",
         extra={"environment": settings.environment, "service": settings.service_name},
     )
 
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await qdrant.close()
         await postgres.close()
         clear_probes()
-        logger.info("faceid service stopping")
+        logger.info("hawkeye service stopping")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -105,7 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(logging.DEBUG if settings.debug else logging.INFO)
 
     app = FastAPI(
-        title="Person Intelligence - Face ID",
+        title="Hawkeye - Person Intelligence Face ID",
         version="0.1.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url=None,

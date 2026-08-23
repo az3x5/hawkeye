@@ -1,5 +1,5 @@
 /**
- * Runtime proxy to the Face ID API.
+ * Runtime proxy to the Hawkeye API.
  *
  * A build-time `rewrites()` rule bakes the destination into the build output,
  * so it cannot follow an environment variable set at deploy time. This handler

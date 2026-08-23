@@ -1,7 +1,11 @@
-# Person Intelligence — Face ID module
+# Hawkeye
 
-Face detection, recognition and identity resolution for the multimodal Person
-Intelligence platform.
+Face detection, recognition and identity resolution — the Face ID module of the
+multimodal Person Intelligence platform.
+
+Hawkeye enrols faces, identifies them against what it holds, and puts a human
+in front of every decision it is not confident enough to make alone. Every
+proposal records the policy that produced it, and every decision is auditable.
 
 **Status: Phase 11 (orphaned image reconciliation) complete.** Erasure spans
 metadata, vectors and images, and housekeeping now reconciles leftovers on both

@@ -17,12 +17,12 @@ export class ConfigurationError extends Error {
   }
 }
 
-/** The Face ID API's base URL. */
+/** The Hawkeye API's base URL. */
 export function apiBaseUrl(): string {
   const configured = process.env.FACEID_API_URL;
   if (configured === undefined || configured.trim() === "") {
     throw new ConfigurationError(
-      "FACEID_API_URL is not set. Point it at the Face ID API, e.g. " +
+      "FACEID_API_URL is not set. Point it at the Hawkeye API, e.g. " +
         "http://api:8000 in compose or http://127.0.0.1:8000 for a local backend.",
     );
   }

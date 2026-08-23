@@ -1,4 +1,4 @@
-# API examples
+# Hawkeye — API examples
 
 Every command below was run against a local stack and works as written. The
 API is on `http://127.0.0.1:8000`; only `/health`, `/readyz` and `/sessions`

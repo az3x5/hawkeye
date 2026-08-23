@@ -31,7 +31,7 @@ function failure(error: unknown): { ok: false; code: string; message: string } {
   if (error instanceof ApiError) {
     return { ok: false, code: error.code, message: error.message };
   }
-  return { ok: false, code: "unreachable", message: "The Face ID API could not be reached." };
+  return { ok: false, code: "unreachable", message: "The Hawkeye API could not be reached." };
 }
 
 export async function changePasswordAction(

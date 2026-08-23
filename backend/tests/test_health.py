@@ -14,7 +14,7 @@ def test_health_returns_declared_schema(client: TestClient) -> None:
     assert response.status_code == 200
     body = HealthResponse.model_validate(response.json())
     assert body.status == "ok"
-    assert body.service == "faceid"
+    assert body.service == "hawkeye"
     assert body.environment == "test"
 
 

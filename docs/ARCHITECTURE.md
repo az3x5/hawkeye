@@ -1,4 +1,4 @@
-# Face ID — Architecture
+# Hawkeye — Architecture
 
 This document describes the target design. Sections marked **(planned)** are
 not implemented yet; `IMPLEMENTATION_STATUS.md` is the authority on what

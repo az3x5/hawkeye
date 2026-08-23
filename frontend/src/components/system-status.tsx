@@ -18,7 +18,7 @@ export async function SystemStatus() {
       <ErrorState
         title="API unreachable"
         message={
-          "The Face ID API did not respond. Check that the backend is running and " +
+          "The Hawkeye API did not respond. Check that the backend is running and " +
           "that FACEID_API_URL points at it."
         }
       />

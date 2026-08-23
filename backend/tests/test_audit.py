@@ -120,7 +120,7 @@ class TestAuditLog:
         async with connector.session() as session:
             events = await SqlAlchemyAuditLog(session).for_identification(identification)
         assert events[0].actor.kind == "system"
-        assert events[0].actor.identifier == "faceid"
+        assert events[0].actor.identifier == "hawkeye"
 
     async def test_events_survive_deletion_of_what_they_describe(
         self, connector: PostgresConnector

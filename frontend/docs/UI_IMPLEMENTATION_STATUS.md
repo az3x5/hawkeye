@@ -1,4 +1,4 @@
-# UI implementation status
+# Hawkeye — UI implementation status
 
 Authoritative record of what the frontend actually does. A phase is complete
 only when its acceptance criteria have been verified by running them.

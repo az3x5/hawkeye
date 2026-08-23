@@ -42,7 +42,7 @@ export async function identifyAction(formData: FormData): Promise<IdentifyResult
     return {
       ok: false,
       code: "unreachable",
-      message: "The Face ID API could not be reached.",
+      message: "The Hawkeye API could not be reached.",
     };
   }
 }

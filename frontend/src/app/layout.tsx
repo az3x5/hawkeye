@@ -5,8 +5,8 @@ import { Sidebar } from "@/components/shell/sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Face ID — Person Intelligence",
-  description: "Face identification, enrolment and review workstation.",
+  title: "Hawkeye — Person Intelligence",
+  description: "Hawkeye: face identification, enrolment and review workstation.",
   // A biometric workstation has no business in search results.
   robots: { index: false, follow: false },
 };

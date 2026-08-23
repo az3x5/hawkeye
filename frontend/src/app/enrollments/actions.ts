@@ -28,7 +28,7 @@ function failure(error: unknown): { ok: false; code: string; message: string; si
       signedOut: error.status === 401,
     };
   }
-  return { ok: false, code: "unreachable", message: "The Face ID API could not be reached." };
+  return { ok: false, code: "unreachable", message: "The Hawkeye API could not be reached." };
 }
 
 export async function enrolAction(formData: FormData): Promise<EnrolResult> {

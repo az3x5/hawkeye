@@ -1,4 +1,4 @@
-# Implementation Status
+# Hawkeye — implementation status
 
 Authoritative record of what is built. One phase at a time; a phase is only
 marked complete when its acceptance criteria have been verified by running

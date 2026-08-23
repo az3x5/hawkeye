@@ -1,5 +1,5 @@
 /**
- * Server-side client for the Face ID API.
+ * Server-side client for the Hawkeye API.
  *
  * Only ever called from server components and route handlers: the API is on an
  * internal network and is never exposed to the reviewer's browser.

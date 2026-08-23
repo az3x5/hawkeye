@@ -35,7 +35,7 @@ export function Breadcrumbs() {
           <span className="identifier text-ink">{segments.slice(1).join("/")}</span>
         </>
       ) : (
-        <span className="font-semibold text-ink">{item?.label ?? "Face ID"}</span>
+        <span className="font-semibold text-ink">{item?.label ?? "Hawkeye"}</span>
       )}
     </nav>
   );

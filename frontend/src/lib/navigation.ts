@@ -76,5 +76,5 @@ export function labelForPath(pathname: string): string {
   const match = NAVIGATION.flatMap((group) => group.items).find((item) =>
     pathname === item.href || pathname.startsWith(`${item.href}/`),
   );
-  return match?.label ?? "Face ID";
+  return match?.label ?? "Hawkeye";
 }
