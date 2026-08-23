@@ -22,6 +22,7 @@ services:
     ports: !override ["${BIND_ADDR}:3000:3000"]
     environment:
       FACEID_API_URL: http://api:8000
+      HAWKEYE_COOKIE_SECURE: ${HAWKEYE_COOKIE_SECURE:-true}
     restart: unless-stopped
 
   worker:

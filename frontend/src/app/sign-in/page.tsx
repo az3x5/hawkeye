@@ -38,7 +38,7 @@ export default async function SignInPage({
     }
 
     const store = await cookies();
-    store.set(SESSION_COOKIE, token, cookieOptions(process.env.NODE_ENV === "production"));
+    store.set(SESSION_COOKIE, token, cookieOptions());
     redirect("/");
   }
 

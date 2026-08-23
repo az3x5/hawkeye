@@ -42,6 +42,10 @@ services:
       # Server-side only: the browser never reaches the API directly, so the
       # API needs no public exposure and no CORS.
       FACEID_API_URL: http://api:8000
+      # Whether the session cookie is marked Secure. Defaults to true; a
+      # browser discards a Secure cookie over plain HTTP on any origin but
+      # localhost, so a deployment served without TLS must say so explicitly.
+      HAWKEYE_COOKIE_SECURE: ${HAWKEYE_COOKIE_SECURE:-true}
     ports: ["127.0.0.1:3000:3000"]
     depends_on: [api]
     networks: [faceid]
