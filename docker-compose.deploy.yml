@@ -1,0 +1,38 @@
+# Deployment overlay.
+#
+# The base topology binds everything to loopback, which is right for a laptop
+# and unreachable on a server. This publishes only the two services a person
+# uses — the API and the review app — on an address the deployment chooses.
+#
+# BIND_ADDR should be a specific interface, not 0.0.0.0. On this deployment it
+# is the host's Tailscale address, so traffic to it is carried inside
+# WireGuard: the application still speaks plain HTTP, and that encryption is
+# what stands between a session token and the network.
+#
+# Postgres, Redis and Qdrant stay unpublished. Qdrant in particular holds
+# biometric embeddings.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
+services:
+  api:
+    ports: !override ["${BIND_ADDR:?set BIND_ADDR to the interface to publish on}:8000:8000"]
+    restart: unless-stopped
+
+  frontend:
+    ports: !override ["${BIND_ADDR}:3000:3000"]
+    environment:
+      FACEID_API_URL: http://api:8000
+    restart: unless-stopped
+
+  worker:
+    restart: unless-stopped
+
+  postgres:
+    ports: !override []
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+  qdrant:
+    restart: unless-stopped
