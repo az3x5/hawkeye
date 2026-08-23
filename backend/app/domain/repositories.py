@@ -49,6 +49,14 @@ class PersonRepository(Protocol):
         """Return every external identifier attached to a person."""
         ...
 
+    async def discard_if_unused(self, person_uuid: UUID) -> bool:
+        """Remove a person that has no identifiers and no samples.
+
+        For cleaning up after losing a race to create someone; it cannot
+        remove a person who has anything attached.
+        """
+        ...
+
 
 @runtime_checkable
 class FaceSampleRepository(Protocol):

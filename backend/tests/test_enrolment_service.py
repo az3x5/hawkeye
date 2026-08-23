@@ -54,6 +54,11 @@ class FakePeople:
     async def list_external_identifiers(self, person_uuid: UUID) -> Sequence[ExternalIdentifier]:
         return []
 
+    async def discard_if_unused(self, person_uuid: UUID) -> bool:
+        if any(owner == person_uuid for owner in self.links.values()):
+            return False
+        return self.people.pop(person_uuid, None) is not None
+
 
 class FakeSamples:
     def __init__(self) -> None:

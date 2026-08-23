@@ -200,7 +200,31 @@ class EnrolmentService:
                 )
             found = owner
 
-        person = found or await self._people.add(Person())
-        for identifier in identifiers:
-            await self._people.link_external_identifier(person.person_uuid, identifier)
+        if found is not None:
+            for identifier in identifiers:
+                await self._people.link_external_identifier(found.person_uuid, identifier)
+            return found
+
+        # Nobody holds these identifiers yet, so create someone. Two concurrent
+        # first enrolments for the same person both reach here; one wins the
+        # identifier, and the other adopts the winner rather than failing.
+        person = await self._people.add(Person())
+        for index, identifier in enumerate(identifiers):
+            try:
+                await self._people.link_external_identifier(person.person_uuid, identifier)
+            except ConflictError:
+                winner = await self._people.find_by_external_identifier(identifier)
+                if winner is None or index > 0:
+                    # Either the conflict was not a race, or we had already
+                    # linked an identifier to our person — which means the
+                    # supplied identifiers denote two different people.
+                    raise
+                await self._people.discard_if_unused(person.person_uuid)
+                for remaining in identifiers:
+                    await self._people.link_external_identifier(winner.person_uuid, remaining)
+                logger.info(
+                    "adopted a person created concurrently",
+                    extra={"person_uuid": str(winner.person_uuid)},
+                )
+                return winner
         return person

@@ -79,28 +79,56 @@ class SqlAlchemyPersonRepository:
     async def link_external_identifier(
         self, person_uuid: UUID, identifier: ExternalIdentifier
     ) -> None:
-        """Attach ``identifier`` to a person; idempotent for the same person."""
+        """Attach ``identifier`` to a person; idempotent for the same person.
+
+        Inserted with ON CONFLICT DO NOTHING rather than checked-then-inserted.
+        A concurrent enrolment of the same person would otherwise pass the
+        check and fail the insert, and an IntegrityError poisons the
+        transaction — leaving nothing that could recover from the race inside
+        the same request. This way losing the race is an ordinary result.
+        """
+        result = await self._session.execute(
+            insert(person_external_identifiers)
+            .values(
+                person_uuid=person_uuid,
+                source=identifier.source,
+                kind=identifier.kind.value,
+                value=identifier.value,
+            )
+            .on_conflict_do_nothing(constraint="uq_external_identifier_scope")
+        )
+        if cast("CursorResult[Any]", result).rowcount > 0:
+            return
+
+        # The row already existed. Ours is a no-op; anybody else's is a
+        # genuine conflict the caller has to resolve.
         owner = await self.find_by_external_identifier(identifier)
-        if owner is not None:
-            if owner.person_uuid == person_uuid:
-                return
+        if owner is not None and owner.person_uuid != person_uuid:
             raise ConflictError(
                 f"external identifier {identifier} is already linked to a different person"
             )
-        try:
-            await self._session.execute(
-                person_external_identifiers.insert().values(
-                    person_uuid=person_uuid,
-                    source=identifier.source,
-                    kind=identifier.kind.value,
-                    value=identifier.value,
-                )
+
+    async def discard_if_unused(self, person_uuid: UUID) -> bool:
+        """Remove a person that has no identifiers and no samples.
+
+        Used to clean up after losing a race to create someone: the row was
+        made moments earlier, nothing references it, and leaving it behind
+        would accumulate unreachable people with every concurrent first
+        enrolment. The conditions make it impossible to delete a person who
+        has anything attached.
+        """
+        result = await self._session.execute(
+            persons.delete().where(
+                persons.c.person_uuid == person_uuid,
+                ~select(face_samples.c.face_sample_uuid)
+                .where(face_samples.c.person_uuid == person_uuid)
+                .exists(),
+                ~select(person_external_identifiers.c.person_uuid)
+                .where(person_external_identifiers.c.person_uuid == person_uuid)
+                .exists(),
             )
-        except IntegrityError as exc:
-            # Lost a race with a concurrent linker, or the person is unknown.
-            raise ConflictError(
-                f"could not link external identifier {identifier} to person {person_uuid}"
-            ) from exc
+        )
+        return cast("CursorResult[Any]", result).rowcount > 0
 
     async def find_by_external_identifier(self, identifier: ExternalIdentifier) -> Person | None:
         """Resolve a source-scoped external identifier to a person, or None."""

@@ -301,3 +301,94 @@ def test_readyz_reports_postgres_when_the_app_starts(
     # Qdrant is registered too; whether it is reachable depends on the
     # environment, so only its presence is asserted here.
     assert "qdrant" in probes
+
+
+class TestConcurrentFirstEnrolment:
+    """Two enrolments racing to create the same person.
+
+    A bulk import with parallel uploads does this whenever a person has more
+    than one photograph: both requests find no identifier, both create a
+    person, and both try to claim the same identifier. Before this was
+    handled, the loser raised an IntegrityError that surfaced as a 500.
+    """
+
+    async def test_losing_the_race_is_a_conflict_not_a_crash(
+        self, connector: PostgresConnector
+    ) -> None:
+        identifier = ExternalIdentifier(
+            source="registry", kind=ExternalIdentifierKind.ID, value="EMP-RACE-1"
+        )
+        winner, loser = Person(), Person()
+        async with connector.session() as session:
+            repo = SqlAlchemyPersonRepository(session)
+            await repo.add(winner)
+            await repo.add(loser)
+            await repo.link_external_identifier(winner.person_uuid, identifier)
+
+        # The loser's transaction stays usable, which is the whole point:
+        # an IntegrityError here would poison it and leave nothing able to
+        # recover inside the same request.
+        async with connector.session() as session:
+            repo = SqlAlchemyPersonRepository(session)
+            with pytest.raises(ConflictError, match="different person"):
+                await repo.link_external_identifier(loser.person_uuid, identifier)
+
+        async with connector.session() as session:
+            owner = await SqlAlchemyPersonRepository(session).find_by_external_identifier(
+                identifier
+            )
+        assert owner is not None
+        assert owner.person_uuid == winner.person_uuid
+
+    async def test_relinking_our_own_identifier_stays_a_no_op(
+        self, connector: PostgresConnector
+    ) -> None:
+        identifier = ExternalIdentifier(
+            source="registry", kind=ExternalIdentifierKind.ID, value="EMP-RACE-2"
+        )
+        person = Person()
+        async with connector.session() as session:
+            repo = SqlAlchemyPersonRepository(session)
+            await repo.add(person)
+            for _ in range(3):
+                await repo.link_external_identifier(person.person_uuid, identifier)
+
+        async with connector.session() as session:
+            found = await SqlAlchemyPersonRepository(session).list_external_identifiers(
+                person.person_uuid
+            )
+        assert list(found) == [identifier]
+
+    async def test_an_unused_person_can_be_discarded(self, connector: PostgresConnector) -> None:
+        person = Person()
+        async with connector.session() as session:
+            await SqlAlchemyPersonRepository(session).add(person)
+        async with connector.session() as session:
+            assert (
+                await SqlAlchemyPersonRepository(session).discard_if_unused(person.person_uuid)
+                is True
+            )
+        async with connector.session() as session:
+            assert await SqlAlchemyPersonRepository(session).get(person.person_uuid) is None
+
+    async def test_a_person_with_anything_attached_is_never_discarded(
+        self, connector: PostgresConnector
+    ) -> None:
+        """The guard is what makes this safe to call after a lost race."""
+        person = Person()
+        async with connector.session() as session:
+            repo = SqlAlchemyPersonRepository(session)
+            await repo.add(person)
+            await repo.link_external_identifier(
+                person.person_uuid,
+                ExternalIdentifier(
+                    source="registry", kind=ExternalIdentifierKind.ID, value="EMP-KEEP"
+                ),
+            )
+        async with connector.session() as session:
+            assert (
+                await SqlAlchemyPersonRepository(session).discard_if_unused(person.person_uuid)
+                is False
+            )
+        async with connector.session() as session:
+            assert await SqlAlchemyPersonRepository(session).get(person.person_uuid) is not None
