@@ -53,11 +53,16 @@ class AdaFaceConfig:
     model_name: str = "adaface_ir101_webface12m"
     device: str = "cpu"
     batch_size: int = 16
+    # Deployment policy, as with the detector: torch defaults to one thread per
+    # core, which oversubscribes the host once more than one process runs.
+    torch_threads: int | None = None
 
     def __post_init__(self) -> None:
-        """Validate the batch size."""
+        """Validate the batch size and thread count."""
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be at least 1, got {self.batch_size}")
+        if self.torch_threads is not None and self.torch_threads < 1:
+            raise ValueError(f"torch_threads must be at least 1, got {self.torch_threads}")
 
 
 class AdaFaceRecognizer:
@@ -119,6 +124,16 @@ class AdaFaceRecognizer:
             logger.warning(
                 "loading recognition weights without an expected checksum",
                 extra={"model_path": str(path), "model_sha256": digest},
+            )
+
+        if self._config.torch_threads is not None:
+            torch.set_num_threads(self._config.torch_threads)
+        # torch would raise on the first transfer anyway, but a configuration
+        # error should be reported as one rather than as a tensor failure.
+        if self._config.device.startswith("cuda") and not torch.cuda.is_available():
+            raise ModelIntegrityError(
+                f"device {self._config.device!r} was requested but CUDA is not available "
+                "to torch in this container"
             )
 
         model = ir_101(output_dim=EMBEDDING_DIM)

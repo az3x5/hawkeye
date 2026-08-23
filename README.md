@@ -216,6 +216,55 @@ A deployment needs two things that are deliberately not in git: its own `.env`,
 and the model weights in `models/` verified against the checksums in
 `.env.example`.
 
+## Machine resources
+
+Inference is the only expensive thing this system does, and both processes that
+do it — the API, on identify, and the worker, continuously — will by default
+size their thread pools to every core on the host and then compete for them.
+Two knobs bound that, per process:
+
+    FACEID_SCRFD_INTRA_OP_THREADS   onnxruntime threads for detection
+    FACEID_ADAFACE_TORCH_THREADS    torch threads for recognition
+
+`docker-compose.yml` sets them from `API_MODEL_THREADS` (default 2) and
+`WORKER_MODEL_THREADS` (default 6), so the worker gets the larger share and the
+two together stay well inside a 16-core host.
+
+The deployment overlay adds a CPU and memory ceiling to every container, so no
+single service — a runaway inference job, an unbounded Postgres query — can
+take the whole machine and stall the health checks that would report it. The
+ceilings overlap on CPU and are not a partition of the host; the memory
+ceilings sum to roughly 23 GB of 30 GB, leaving the host its own headroom.
+
+### Running on a GPU
+
+The application side is configuration only:
+
+    FACEID_SCRFD_PROVIDERS='["CUDAExecutionProvider","CPUExecutionProvider"]'
+    FACEID_ADAFACE_DEVICE=cuda
+
+Both are checked at load. onnxruntime otherwise falls back to CPU silently when
+a provider is missing, which would let a deployment believe it is on the GPU
+while it is not, so an unavailable provider or an unavailable CUDA runtime is a
+startup error instead.
+
+The host and image side is not configuration, and none of it is done on
+`cyber-ai` today. That machine has an RTX 5060 (Blackwell, GB206) which is
+present on the PCI bus but has no driver loaded, no `/dev/nvidia*` and no
+NVIDIA runtime registered with Docker. Enabling it needs root on the host:
+
+1. an NVIDIA driver new enough for Blackwell (570 or later),
+2. `nvidia-container-toolkit`, and `nvidia-ctk runtime configure --runtime=docker`,
+3. `gpus: all` (or an equivalent device reservation) on the `api` and `worker`
+   services,
+4. images built against CUDA wheels — the Dockerfile currently installs torch
+   from `download.pytorch.org/whl/cpu` and `onnxruntime`, both of which must
+   become their CUDA counterparts (`cu128` or later for Blackwell), which adds
+   several GB to each image.
+
+Until all four are done, the settings above will refuse to start rather than
+quietly run on the CPU.
+
 ## Configuration
 
 All settings come from the environment with the `FACEID_` prefix (see

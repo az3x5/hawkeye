@@ -66,9 +66,20 @@ class SCRFDConfig:
     input_size: tuple[int, int] = (640, 640)
     model_name: str = "scrfd_10g_bnkps"
     providers: tuple[str, ...] = ("CPUExecutionProvider",)
+    # Thread counts are deployment policy, not a property of the model. Left
+    # unset, onnxruntime sizes its pools to every core on the machine, so two
+    # processes on one host each try to own the whole CPU and fight for it.
+    intra_op_threads: int | None = None
+    inter_op_threads: int | None = None
 
     def __post_init__(self) -> None:
         """Validate the ranges the detector cannot sensibly run outside."""
+        for name in ("intra_op_threads", "inter_op_threads"):
+            threads = getattr(self, name)
+            if threads is not None and threads < 1:
+                raise ValueError(f"{name} must be at least 1, got {threads}")
+        if not self.providers:
+            raise ValueError("at least one execution provider is required")
         if not 0.0 < self.score_threshold <= 1.0:
             raise ValueError(f"score_threshold must be in (0, 1], got {self.score_threshold}")
         if not 0.0 < self.nms_iou_threshold <= 1.0:
@@ -143,7 +154,24 @@ class SCRFDDetector:
                 extra={"model_path": str(path), "model_sha256": digest},
             )
 
-        session = ort.InferenceSession(str(path), providers=list(self._config.providers))
+        requested = list(self._config.providers)
+        # onnxruntime falls back to CPU without complaint when a provider is
+        # missing. That silence would let a deployment believe it is on the GPU
+        # while it is not, so the mismatch is raised instead.
+        available = set(ort.get_available_providers())
+        missing = [provider for provider in requested if provider not in available]
+        if missing:
+            raise ModelIntegrityError(
+                f"execution providers {missing} are not available in this build of "
+                f"onnxruntime; available providers are {sorted(available)}"
+            )
+
+        options = ort.SessionOptions()
+        if self._config.intra_op_threads is not None:
+            options.intra_op_num_threads = self._config.intra_op_threads
+        if self._config.inter_op_threads is not None:
+            options.inter_op_num_threads = self._config.inter_op_threads
+        session = ort.InferenceSession(str(path), sess_options=options, providers=requested)
         outputs = len(session.get_outputs())
         if outputs != len(STRIDES) * 3:
             raise ModelIntegrityError(

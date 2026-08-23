@@ -78,6 +78,34 @@ class TestConfig:
         assert strict.score_threshold != lenient.score_threshold
 
 
+class TestResourceLimits:
+    @pytest.mark.parametrize("field", ["intra_op_threads", "inter_op_threads"])
+    def test_thread_counts_below_one_are_rejected(self, field: str) -> None:
+        with pytest.raises(ValueError, match=field):
+            SCRFDConfig(model_path=WEIGHTS, **{field: 0})
+
+    def test_an_empty_provider_list_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="execution provider"):
+            SCRFDConfig(model_path=WEIGHTS, providers=())
+
+    @requires_weights
+    def test_an_unavailable_provider_fails_instead_of_falling_back(self) -> None:
+        """A GPU that is not there must be an error, never a silent CPU run."""
+        detector = SCRFDDetector(
+            SCRFDConfig(model_path=WEIGHTS, providers=("NoSuchExecutionProvider",))
+        )
+        with pytest.raises(ModelIntegrityError, match="NoSuchExecutionProvider"):
+            detector.warmup()
+
+    @requires_weights
+    def test_bounded_threads_still_detect(self) -> None:
+        detector = SCRFDDetector(
+            SCRFDConfig(model_path=WEIGHTS, intra_op_threads=1, inter_op_threads=1)
+        )
+        detector.warmup()
+        assert detector.detect(_face_image())
+
+
 class TestSettingsWiring:
     def test_settings_drive_the_detector_configuration(
         self, monkeypatch: pytest.MonkeyPatch
@@ -87,11 +115,14 @@ class TestSettingsWiring:
         monkeypatch.setenv("FACEID_SCRFD_MODEL_PATH", str(WEIGHTS))
         monkeypatch.setenv("FACEID_SCRFD_SCORE_THRESHOLD", "0.7")
         monkeypatch.setenv("FACEID_SCRFD_NMS_IOU_THRESHOLD", "0.3")
+        monkeypatch.setenv("FACEID_SCRFD_INTRA_OP_THREADS", "2")
 
         config = build_scrfd_config(Settings())  # type: ignore[call-arg]
         assert config.model_path == WEIGHTS
         assert config.score_threshold == pytest.approx(0.7)
         assert config.nms_iou_threshold == pytest.approx(0.3)
+        assert config.intra_op_threads == 2
+        assert config.providers == ("CPUExecutionProvider",)
 
     def test_missing_weights_configuration_is_an_explicit_error(
         self, monkeypatch: pytest.MonkeyPatch

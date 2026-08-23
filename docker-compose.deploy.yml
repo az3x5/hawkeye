@@ -12,13 +12,26 @@
 # Postgres, Redis and Qdrant stay unpublished. Qdrant in particular holds
 # biometric embeddings.
 #
+# Every service also gets a CPU and memory ceiling. The host has 16 cores and
+# 30 GB; without limits one runaway inference job or one Postgres query can
+# take all of it and stall everything else, including the health checks that
+# would tell you it happened. The ceilings deliberately overlap — they cap a
+# single service, they are not a partition of the machine — but the memory
+# ceilings sum to roughly 23 GB, leaving the host its own headroom.
+#
 #   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
 services:
   api:
+    deploy:
+      resources:
+        limits: {cpus: "4.0", memory: 6g}
     ports: !override ["${BIND_ADDR:?set BIND_ADDR to the interface to publish on}:8000:8000"]
     restart: unless-stopped
 
   frontend:
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 1g}
     ports: !override ["${BIND_ADDR}:3000:3000"]
     environment:
       FACEID_API_URL: http://api:8000
@@ -26,14 +39,26 @@ services:
     restart: unless-stopped
 
   worker:
+    deploy:
+      resources:
+        limits: {cpus: "8.0", memory: 8g}
     restart: unless-stopped
 
   postgres:
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 4g}
     ports: !override []
     restart: unless-stopped
 
   redis:
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 512m}
     restart: unless-stopped
 
   qdrant:
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 4g}
     restart: unless-stopped

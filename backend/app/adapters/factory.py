@@ -31,6 +31,9 @@ def build_scrfd_config(settings: Settings) -> SCRFDConfig:
         score_threshold=settings.scrfd_score_threshold,
         nms_iou_threshold=settings.scrfd_nms_iou_threshold,
         input_size=(settings.scrfd_input_size, settings.scrfd_input_size),
+        providers=tuple(settings.scrfd_providers),
+        intra_op_threads=settings.scrfd_intra_op_threads,
+        inter_op_threads=settings.scrfd_inter_op_threads,
     )
 
 
@@ -50,6 +53,7 @@ def build_adaface_config(settings: Settings) -> AdaFaceConfig:
         expected_sha256=settings.adaface_model_sha256,
         device=settings.adaface_device,
         batch_size=settings.adaface_batch_size,
+        torch_threads=settings.adaface_torch_threads,
     )
 
 

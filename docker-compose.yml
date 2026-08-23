@@ -23,6 +23,13 @@ services:
       FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
       FACEID_ADAFACE_MODEL_PATH: /srv/models/adaface_ir101_webface12m.safetensors
       FACEID_ADAFACE_MODEL_SHA256: ${FACEID_ADAFACE_MODEL_SHA256:-}
+      # Bounded so the API and the worker do not each try to own every core.
+      # The API only runs a model per identify request; the worker runs them
+      # continuously, so the larger share goes there.
+      FACEID_SCRFD_INTRA_OP_THREADS: ${API_MODEL_THREADS:-2}
+      FACEID_ADAFACE_TORCH_THREADS: ${API_MODEL_THREADS:-2}
+      FACEID_SCRFD_PROVIDERS: ${SCRFD_PROVIDERS:-["CPUExecutionProvider"]}
+      FACEID_ADAFACE_DEVICE: ${ADAFACE_DEVICE:-cpu}
     ports: ["127.0.0.1:8000:8000"]
     # Weights are mounted read-only, never baked into the image or committed.
     # Source images are shared with the worker, which reads what the API wrote.
@@ -71,6 +78,10 @@ services:
       FACEID_SCRFD_MODEL_SHA256: ${FACEID_SCRFD_MODEL_SHA256:-}
       FACEID_ADAFACE_MODEL_PATH: /srv/models/adaface_ir101_webface12m.safetensors
       FACEID_ADAFACE_MODEL_SHA256: ${FACEID_ADAFACE_MODEL_SHA256:-}
+      FACEID_SCRFD_INTRA_OP_THREADS: ${WORKER_MODEL_THREADS:-6}
+      FACEID_ADAFACE_TORCH_THREADS: ${WORKER_MODEL_THREADS:-6}
+      FACEID_SCRFD_PROVIDERS: ${SCRFD_PROVIDERS:-["CPUExecutionProvider"]}
+      FACEID_ADAFACE_DEVICE: ${ADAFACE_DEVICE:-cpu}
     # No published port: the worker takes work from Redis, not from callers.
     depends_on:
       postgres: {condition: service_healthy}

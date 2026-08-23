@@ -113,6 +113,10 @@ class TestConfig:
         with pytest.raises(ValueError, match="batch_size"):
             AdaFaceConfig(model_path=WEIGHTS, batch_size=0)
 
+    def test_thread_count_below_one_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="torch_threads"):
+            AdaFaceConfig(model_path=WEIGHTS, torch_threads=0)
+
     def test_config_carries_no_threshold(self) -> None:
         """Recognition has no notion of a match, so there is nothing to tune."""
         assert not {f for f in AdaFaceConfig.__dataclass_fields__ if "threshold" in f}
@@ -126,10 +130,12 @@ class TestSettingsWiring:
             monkeypatch.setenv(key, value)
         monkeypatch.setenv("FACEID_ADAFACE_MODEL_PATH", str(WEIGHTS))
         monkeypatch.setenv("FACEID_ADAFACE_BATCH_SIZE", "4")
+        monkeypatch.setenv("FACEID_ADAFACE_TORCH_THREADS", "2")
 
         config = build_adaface_config(Settings())  # type: ignore[call-arg]
         assert config.model_path == WEIGHTS
         assert config.batch_size == 4
+        assert config.torch_threads == 2
 
     def test_missing_weights_configuration_is_an_explicit_error(
         self, monkeypatch: pytest.MonkeyPatch

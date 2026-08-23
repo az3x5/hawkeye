@@ -108,6 +108,22 @@ class Settings(BaseSettings):
     scrfd_score_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
     scrfd_nms_iou_threshold: float = Field(default=0.4, gt=0.0, le=1.0)
     scrfd_input_size: int = Field(default=640, multiple_of=32, ge=32)
+    # Execution providers and thread pools are host policy. The CPU provider is
+    # the only one guaranteed to exist; a GPU deployment sets this explicitly
+    # and is told loudly if the provider is missing from the image.
+    scrfd_providers: tuple[str, ...] = Field(
+        default=("CPUExecutionProvider",),
+        min_length=1,
+        description="onnxruntime execution providers, most preferred first.",
+    )
+    scrfd_intra_op_threads: int | None = Field(
+        default=None,
+        ge=1,
+        description="Threads within one detection op. Unset means every core.",
+    )
+    scrfd_inter_op_threads: int | None = Field(
+        default=None, ge=1, description="Threads across detection ops."
+    )
 
     # Face recognition. Supplied and verified exactly like the detector's.
     # There is deliberately no threshold here: recognition reports similarity
@@ -123,6 +139,11 @@ class Settings(BaseSettings):
     )
     adaface_device: str = Field(default="cpu", min_length=1)
     adaface_batch_size: int = Field(default=16, ge=1, le=256)
+    adaface_torch_threads: int | None = Field(
+        default=None,
+        ge=1,
+        description="Torch intra-op threads. Unset means every core on the host.",
+    )
 
     @property
     def debug(self) -> bool:
