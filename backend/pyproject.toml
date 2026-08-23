@@ -36,6 +36,12 @@ dev = [
     "scikit-image>=0.24",
 ]
 
+# Without this, setuptools sees `app` and `migrations` side by side and
+# refuses to guess which is the package. It never surfaced in the image build,
+# where only pyproject.toml exists when dependencies are installed.
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
