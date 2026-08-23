@@ -79,10 +79,13 @@ class TestConfig:
 
 
 class TestResourceLimits:
-    @pytest.mark.parametrize("field", ["intra_op_threads", "inter_op_threads"])
-    def test_thread_counts_below_one_are_rejected(self, field: str) -> None:
-        with pytest.raises(ValueError, match=field):
-            SCRFDConfig(model_path=WEIGHTS, **{field: 0})
+    def test_an_intra_op_thread_count_below_one_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="intra_op_threads"):
+            SCRFDConfig(model_path=WEIGHTS, intra_op_threads=0)
+
+    def test_an_inter_op_thread_count_below_one_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="inter_op_threads"):
+            SCRFDConfig(model_path=WEIGHTS, inter_op_threads=0)
 
     def test_an_empty_provider_list_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="execution provider"):
