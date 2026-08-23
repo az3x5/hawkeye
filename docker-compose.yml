@@ -6,7 +6,7 @@
 services:
   api:
     build: ./backend
-    image: faceid-api:dev
+    image: hawkeye-api:dev
     env_file: [.env]
     environment:
       FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -37,7 +37,7 @@ services:
 
   frontend:
     build: ./frontend
-    image: faceid-review:dev
+    image: hawkeye-review:dev
     environment:
       # Server-side only: the browser never reaches the API directly, so the
       # API needs no public exposure and no CORS.
@@ -47,8 +47,9 @@ services:
     networks: [faceid]
 
   worker:
-    build: ./backend
-    image: faceid-api:dev
+    # No build of its own: this is the api image with a different command, and
+    # a second build targeting the same tag makes `compose build` fail.
+    image: hawkeye-api:dev
     command: ["python", "-m", "app.worker"]
     env_file: [.env]
     environment:
