@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 import type { CapabilityKey } from "@/lib/capabilities";
@@ -46,6 +47,7 @@ export const NAVIGATION: NavGroup[] = [
     label: "Operations",
     items: [
       { href: "/identify", label: "Identify", icon: ScanFace, capability: "identify" },
+      { href: "/tracker", label: "Camera tracker", icon: Video, capability: "identify" },
       {
         href: "/enrollments",
         label: "Enrollments",
