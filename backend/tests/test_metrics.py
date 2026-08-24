@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Never
 from uuid import uuid4
 
@@ -14,7 +16,7 @@ from app.domain.auth import Principal
 
 
 def test_memory_usage_reads_available_host_memory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / "meminfo").write_text(
         "MemTotal:       1000 kB\nMemAvailable:    250 kB\n",
@@ -36,7 +38,7 @@ async def test_missing_nvidia_tools_is_reported_as_unavailable(
     async def missing(*_args: Any, **_kwargs: Any) -> Never:
         raise FileNotFoundError
 
-    monkeypatch.setattr(metrics.asyncio, "create_subprocess_exec", missing)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", missing)
 
     gpus, error = await metrics._gpu_usage()
 
