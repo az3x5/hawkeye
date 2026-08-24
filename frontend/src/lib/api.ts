@@ -21,6 +21,7 @@ import type {
   PersonSummary,
   Readiness,
   Statistics,
+  SystemMetrics,
   TokenRecord,
   Identification,
   Identity,
@@ -118,6 +119,11 @@ export async function fetchHealth(): Promise<Health | null> {
   } catch {
     return null;
   }
+}
+
+/** Current authenticated host-resource metrics for the operations dashboard. */
+export function fetchSystemMetrics(): Promise<SystemMetrics> {
+  return request<SystemMetrics>("/api/v1/system/metrics");
 }
 
 /** Who the signed-in reviewer is. */

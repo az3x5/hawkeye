@@ -5,10 +5,11 @@
  * so it cannot follow an environment variable set at deploy time. This handler
  * reads the address per request instead.
  *
- * It is also an allowlist rather than a passthrough: only the two image reads
- * and the review write a browser legitimately needs are forwarded. Enrolment,
- * identification and the queue are server-rendered and never travel through
- * here, so exposing them to the browser would widen the surface for nothing.
+ * It is also an allowlist rather than a passthrough: only image reads, live
+ * system metrics and the review write a browser legitimately needs are
+ * forwarded. Enrolment, identification and the queue are server-rendered and
+ * never travel through here, so exposing them to the browser would widen the
+ * surface for nothing.
  */
 
 import { NextResponse } from "next/server";
@@ -21,6 +22,7 @@ import { readToken } from "@/lib/session";
 const READABLE = [
   /^identifications\/[0-9a-f-]{36}\/image$/,
   /^face-samples\/[0-9a-f-]{36}\/image$/,
+  /^system\/metrics$/,
 ];
 
 const WRITABLE = [/^identifications\/[0-9a-f-]{36}\/review$/];
@@ -64,7 +66,10 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           }
-        : { Accept: "image/jpeg", Authorization: `Bearer ${token}` },
+        : {
+            Accept: path === "system/metrics" ? "application/json" : "image/jpeg",
+            Authorization: `Bearer ${token}`,
+          },
     body: request.method === "POST" ? await request.text() : undefined,
     cache: "no-store",
   });

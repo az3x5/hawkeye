@@ -74,6 +74,28 @@ export interface Health {
   environment: string;
 }
 
+export interface CapacityUsage {
+  used_bytes: number;
+  total_bytes: number;
+  percent: number;
+}
+
+export interface GpuUsage {
+  name: string;
+  utilization_percent: number;
+  memory: CapacityUsage;
+}
+
+export interface SystemMetrics {
+  collected_at: string;
+  cpu_percent: number;
+  cpu_count: number;
+  memory: CapacityUsage;
+  disk: CapacityUsage;
+  gpus: GpuUsage[];
+  gpu_error: string | null;
+}
+
 export interface Paged<T> {
   items: T[];
   total: number;

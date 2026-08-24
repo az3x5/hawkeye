@@ -3,13 +3,15 @@ import Link from "next/link";
 import { PageHeader } from "@/components/shell/page-header";
 import { StatusBadge, toneForOutcome } from "@/components/states/status-badge";
 import { SystemStatus } from "@/components/system-status";
-import { ApiError, NotAuthenticatedError, fetchStatistics } from "@/lib/api";
-import type { Statistics } from "@/lib/types";
+import { HardwareUsage } from "@/components/hardware-usage";
+import { ApiError, NotAuthenticatedError, fetchStatistics, fetchSystemMetrics } from "@/lib/api";
+import type { Statistics, SystemMetrics } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   let stats: Statistics | null = null;
+  let systemMetrics: SystemMetrics | null = null;
   let problem: string | null = null;
 
   try {
@@ -19,6 +21,13 @@ export default async function DashboardPage() {
     if (error instanceof ApiError && error.status === 401) redirect("/sign-in");
     problem =
       error instanceof ApiError ? error.message : "Counts could not be read from the API.";
+  }
+
+  try {
+    systemMetrics = await fetchSystemMetrics();
+  } catch (error) {
+    if (error instanceof NotAuthenticatedError) redirect("/sign-in");
+    if (error instanceof ApiError && error.status === 401) redirect("/sign-in");
   }
 
   return (
@@ -69,6 +78,7 @@ export default async function DashboardPage() {
           </>
         )}
 
+        <HardwareUsage initial={systemMetrics} />
         <SystemStatus />
       </div>
     </>

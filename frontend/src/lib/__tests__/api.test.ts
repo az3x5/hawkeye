@@ -96,6 +96,28 @@ describe("proxy allowlist", () => {
     });
     expect(refused.status).toBe(404);
   });
+
+  it("forwards authenticated system metrics as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ cpu_percent: 25 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { GET } = await import("../../app/api/v1/[...path]/route");
+
+    const response = await GET(new Request("http://localhost/api/v1/system/metrics"), {
+      params: Promise.resolve({ path: ["system", "metrics"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cpu_percent: 25 });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer faceid_test-token",
+    });
+  });
 });
 
 describe("authentication", () => {

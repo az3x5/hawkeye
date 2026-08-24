@@ -15,6 +15,7 @@ from app.api.v1.enrolments import router as enrolment_router
 from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
 from app.api.v1.me import router as me_router
+from app.api.v1.metrics import router as metrics_router
 from app.api.v1.persons import router as person_router
 from app.api.v1.sessions import router as session_router
 from app.connectors.filesystem import FilesystemObjectStore
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     install_error_handlers(app)
     app.include_router(health_router, prefix=settings.api_v1_prefix)
+    app.include_router(metrics_router, prefix=settings.api_v1_prefix)
     app.include_router(enrolment_router, prefix=settings.api_v1_prefix)
     app.include_router(identification_router, prefix=settings.api_v1_prefix)
     app.include_router(person_router, prefix=settings.api_v1_prefix)
