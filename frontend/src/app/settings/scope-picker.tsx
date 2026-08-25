@@ -5,6 +5,7 @@ const MEANING: Record<string, string> = {
   enrol: "register faces and read sample state",
   identify: "submit identifications",
   review: "read the queue and record review decisions",
+  language: "normalize, analyze and transliterate Dhivehi text",
   admin: "erase people, manage accounts and credentials",
 };
 

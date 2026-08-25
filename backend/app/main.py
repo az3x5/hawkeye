@@ -14,6 +14,7 @@ from app.api.v1.browse import router as browse_router
 from app.api.v1.enrolments import router as enrolment_router
 from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
+from app.api.v1.language import router as language_router
 from app.api.v1.me import router as me_router
 from app.api.v1.metrics import router as metrics_router
 from app.api.v1.persons import router as person_router
@@ -118,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(metrics_router, prefix=settings.api_v1_prefix)
     app.include_router(enrolment_router, prefix=settings.api_v1_prefix)
     app.include_router(identification_router, prefix=settings.api_v1_prefix)
+    app.include_router(language_router, prefix=settings.api_v1_prefix)
     app.include_router(person_router, prefix=settings.api_v1_prefix)
     app.include_router(me_router, prefix=settings.api_v1_prefix)
     app.include_router(session_router, prefix=settings.api_v1_prefix)

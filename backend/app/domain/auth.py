@@ -45,6 +45,7 @@ class Scope(StrEnum):
     ENROL = "enrol"
     IDENTIFY = "identify"
     REVIEW = "review"
+    LANGUAGE = "language"
     ADMIN = "admin"
 
 

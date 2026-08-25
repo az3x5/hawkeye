@@ -25,8 +25,11 @@ import type {
   TokenRecord,
   Identification,
   Identity,
+  LanguageNormalization,
+  LanguageTransliteration,
   ReviewOutcome,
   ReviewQueue,
+  TransliterationDirection,
 } from "./types";
 
 // Read per call rather than at import: a module should not refuse to load
@@ -129,6 +132,27 @@ export function fetchSystemMetrics(): Promise<SystemMetrics> {
 /** Who the signed-in reviewer is. */
 export function fetchIdentity(): Promise<Identity> {
   return request<Identity>("/api/v1/me");
+}
+
+/** Normalize Unicode and classify observable Thaana/Latin script spans. */
+export function normalizeLanguageText(text: string): Promise<LanguageNormalization> {
+  return request<LanguageNormalization>("/api/v1/nlp/normalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+/** Apply an explicit, versioned transliteration direction. */
+export function transliterateLanguageText(
+  text: string,
+  direction: TransliterationDirection,
+): Promise<LanguageTransliteration> {
+  return request<LanguageTransliteration>("/api/v1/nlp/transliterate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, direction }),
+  });
 }
 
 /** Proposals waiting for a human, oldest first. */

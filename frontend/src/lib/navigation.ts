@@ -10,6 +10,7 @@ import {
   FileClock,
   Fingerprint,
   LayoutDashboard,
+  Languages,
   ScanFace,
   Settings,
   ShieldCheck,
@@ -62,6 +63,7 @@ export const NAVIGATION: NavGroup[] = [
     items: [
       { href: "/persons", label: "Persons", icon: Users, capability: "persons" },
       { href: "/matches", label: "Matches", icon: ShieldCheck, capability: "matches" },
+      { href: "/language", label: "Dhivehi NLP", icon: Languages, capability: "language" },
     ],
   },
   {

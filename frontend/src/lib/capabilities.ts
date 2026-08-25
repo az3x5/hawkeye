@@ -76,6 +76,12 @@ export const CAPABILITIES: Record<CapabilityKey, Capability> = {
     missing: [],
     note: "Every identification can be listed and filtered.",
   },
+  language: {
+    state: "available",
+    supported: ["POST /nlp/normalize", "POST /nlp/transliterate"],
+    missing: [],
+    note: "Unicode normalization, script detection and rule transliteration are available.",
+  },
   audit: {
     state: "available",
     supported: ["GET /audit-events"],
@@ -102,5 +108,6 @@ export type CapabilityKey =
   | "review"
   | "persons"
   | "matches"
+  | "language"
   | "audit"
   | "settings";

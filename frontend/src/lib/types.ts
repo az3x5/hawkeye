@@ -214,8 +214,35 @@ export interface IssuedToken extends TokenRecord {
 }
 
 /** The scopes the API recognises. */
-export const SCOPES = ["enrol", "identify", "review", "admin"] as const;
+export const SCOPES = ["enrol", "identify", "review", "language", "admin"] as const;
 export type Scope = (typeof SCOPES)[number];
+
+export type LanguageScript = "thaana" | "latin" | "number" | "other";
+export type PrimaryScript = "thaana" | "latin" | "mixed" | "none";
+export type TransliterationDirection = "latin_to_thaana" | "thaana_to_latin";
+
+export interface LanguageScriptSpan {
+  text: string;
+  start: number;
+  end: number;
+  script: LanguageScript;
+}
+
+export interface LanguageNormalization {
+  original: string;
+  normalized: string;
+  primary_script: PrimaryScript;
+  spans: LanguageScriptSpan[];
+  normalizer_version: string;
+}
+
+export interface LanguageTransliteration {
+  original: string;
+  output: string;
+  direction: TransliterationDirection;
+  model_version: string;
+  warnings: string[];
+}
 
 /** The API's structured error envelope. */
 export interface ApiErrorDetail {

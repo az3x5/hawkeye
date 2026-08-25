@@ -6,7 +6,14 @@ process.env.FACEID_API_URL = "http://api.test:8000";
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => ({ value: "faceid_test-token" }) }),
 }));
-import { ApiError, fetchIdentification, fetchReviewQueue, submitReview } from "../api";
+import {
+  ApiError,
+  fetchIdentification,
+  fetchReviewQueue,
+  normalizeLanguageText,
+  submitReview,
+  transliterateLanguageText,
+} from "../api";
 
 function mockFetch(status: number, body: unknown) {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -73,6 +80,31 @@ describe("submitReview", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       outcome: "rejected",
       note: "not the same",
+    });
+  });
+});
+
+describe("language API", () => {
+  it("posts text for normalization without caching", async () => {
+    const fetchMock = mockFetch(200, { normalized: "ދިވެހި" });
+
+    await normalizeLanguageText("ދިވެހި");
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v1/nlp/normalize");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init).toMatchObject({ method: "POST", cache: "no-store" });
+    expect(JSON.parse(String(init.body))).toEqual({ text: "ދިވެހި" });
+  });
+
+  it("sends an explicit transliteration direction", async () => {
+    const fetchMock = mockFetch(200, { output: "ދިވެހި" });
+
+    await transliterateLanguageText("dhivehi", "latin_to_thaana");
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      text: "dhivehi",
+      direction: "latin_to_thaana",
     });
   });
 });
