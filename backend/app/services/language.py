@@ -174,9 +174,7 @@ def transliterate(text: str, direction: TransliterationDirection) -> Translitera
         warnings: tuple[str, ...] = ()
     else:
         output = _LATIN_WORD.sub(lambda match: _latin_word_to_thaana(match.group()), normalized)
-        warnings = (
-            "Latin-to-Thaana is phonetic and ambiguous; review names and English words.",
-        )
+        warnings = ("Latin-to-Thaana is phonetic and ambiguous; review names and English words.",)
     return Transliteration(
         original=text,
         output=output,

@@ -80,8 +80,7 @@ async def normalize(
         normalized=result.normalized,
         primary_script=result.primary_script,
         spans=[
-            ScriptSpanResponse.model_validate(span, from_attributes=True)
-            for span in result.spans
+            ScriptSpanResponse.model_validate(span, from_attributes=True) for span in result.spans
         ],
         normalizer_version=NORMALIZER_VERSION,
     )
