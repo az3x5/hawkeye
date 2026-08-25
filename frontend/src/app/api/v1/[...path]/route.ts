@@ -22,6 +22,7 @@ import { readToken } from "@/lib/session";
 const READABLE = [
   /^identifications\/[0-9a-f-]{36}\/image$/,
   /^face-samples\/[0-9a-f-]{36}\/image$/,
+  /^statistics$/,
   /^system\/metrics$/,
 ];
 
@@ -67,7 +68,7 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Authorization: `Bearer ${token}`,
           }
         : {
-            Accept: path === "system/metrics" ? "application/json" : "image/jpeg",
+            Accept: path === "system/metrics" || path === "statistics" ? "application/json" : "image/jpeg",
             Authorization: `Bearer ${token}`,
           },
     body: request.method === "POST" ? await request.text() : undefined,

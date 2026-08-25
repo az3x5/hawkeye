@@ -118,6 +118,28 @@ describe("proxy allowlist", () => {
       Authorization: "Bearer faceid_test-token",
     });
   });
+
+  it("forwards authenticated live statistics as JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ persons: 123 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { GET } = await import("../../app/api/v1/[...path]/route");
+
+    const response = await GET(new Request("http://localhost/api/v1/statistics"), {
+      params: Promise.resolve({ path: ["statistics"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ persons: 123 });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer faceid_test-token",
+    });
+  });
 });
 
 describe("authentication", () => {
