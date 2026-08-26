@@ -20,6 +20,9 @@ services:
   worker:
     image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
 
+  language-worker:
+    image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+
   frontend:
     build: !reset null
     image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-review:${HAWKEYE_TAG:-latest}

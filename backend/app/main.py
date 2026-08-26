@@ -22,11 +22,17 @@ from app.api.v1.sessions import router as session_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
-from app.connectors.redis import RedisConnector, RedisJobQueue, RedisRateLimiter
+from app.connectors.redis import (
+    RedisConnector,
+    RedisJobQueue,
+    RedisLanguageJobQueue,
+    RedisRateLimiter,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.readiness import clear_probes, register_probe
+from app.services.language_embeddings import MultilingualE5Embedder
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     redis = RedisConnector(str(settings.redis_dsn))
     app.state.redis = redis
     app.state.queue = RedisJobQueue(redis)
+    app.state.language_queue = RedisLanguageJobQueue(redis)
     app.state.rate_limiter = RedisRateLimiter(redis)
     register_probe(redis.provider, redis.ping)
 
@@ -86,6 +93,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     else:
         logger.warning("identification models are not configured; identification will fail")
+
+    app.state.language_embedder = None
+    if settings.language_embedding_model:
+        app.state.language_embedder = MultilingualE5Embedder(
+            settings.language_embedding_model,
+            model_version=settings.language_embedding_version,
+            device=settings.language_embedding_device,
+            batch_size=settings.language_embedding_batch_size,
+            max_tokens=settings.language_embedding_max_tokens,
+        )
+        logger.info(
+            "language embedding model loaded",
+            extra={
+                "model": settings.language_embedding_model,
+                "version": settings.language_embedding_version,
+            },
+        )
+    else:
+        logger.warning("language embedding model is not configured; semantic search will fail")
 
     try:
         yield

@@ -26,6 +26,8 @@ import type {
   Identification,
   Identity,
   LanguageNormalization,
+  LanguageDocument,
+  LanguageSearchResponse,
   LanguageTransliteration,
   ReviewOutcome,
   ReviewQueue,
@@ -152,6 +154,34 @@ export function transliterateLanguageText(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, direction }),
+  });
+}
+
+/** Persist a language document and schedule its semantic embedding. */
+export function createLanguageDocument(body: {
+  title: string;
+  source: string;
+  text: string;
+  attributes?: Record<string, unknown>;
+}): Promise<LanguageDocument> {
+  return request<LanguageDocument>("/api/v1/nlp/documents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Search indexed language documents by multilingual semantic similarity. */
+export function searchLanguageDocuments(body: {
+  text: string;
+  limit?: number;
+  source?: string;
+  minimum_score?: number;
+}): Promise<LanguageSearchResponse> {
+  return request<LanguageSearchResponse>("/api/v1/nlp/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 

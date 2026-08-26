@@ -145,6 +145,18 @@ class Settings(BaseSettings):
         description="Torch intra-op threads. Unset means every core on the host.",
     )
 
+    # Language semantics. The model may be a Hugging Face identifier during
+    # development or a mounted local directory in a controlled deployment.
+    # Its operator-supplied version is written to every indexed document.
+    language_embedding_model: str | None = Field(
+        default=None,
+        description="SentenceTransformers model identifier or local model directory.",
+    )
+    language_embedding_version: str = Field(default="unconfigured", min_length=1)
+    language_embedding_device: str = Field(default="cpu", min_length=1)
+    language_embedding_batch_size: int = Field(default=16, ge=1, le=256)
+    language_embedding_max_tokens: int = Field(default=512, ge=32, le=8192)
+
     @property
     def debug(self) -> bool:
         """True only in local development, where docs and debug logs are on."""

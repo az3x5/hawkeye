@@ -11,6 +11,8 @@ import {
   fetchIdentification,
   fetchReviewQueue,
   normalizeLanguageText,
+  createLanguageDocument,
+  searchLanguageDocuments,
   submitReview,
   transliterateLanguageText,
 } from "../api";
@@ -105,6 +107,33 @@ describe("language API", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       text: "dhivehi",
       direction: "latin_to_thaana",
+    });
+  });
+
+  it("submits a document for asynchronous semantic indexing", async () => {
+    const fetchMock = mockFetch(202, { processing_state: "pending" });
+
+    await createLanguageDocument({ title: "Weather", source: "manual", text: "މޫސުމް" });
+
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toContain("/api/v1/nlp/documents");
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({
+      title: "Weather",
+      source: "manual",
+      text: "މޫސުމް",
+    });
+  });
+
+  it("posts semantic search filters", async () => {
+    const fetchMock = mockFetch(200, { hits: [] });
+
+    await searchLanguageDocuments({ text: "weather", limit: 10, source: "news" });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      text: "weather",
+      limit: 10,
+      source: "news",
     });
   });
 });

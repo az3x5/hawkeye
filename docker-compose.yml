@@ -30,12 +30,18 @@ services:
       FACEID_ADAFACE_TORCH_THREADS: ${API_MODEL_THREADS:-2}
       FACEID_SCRFD_PROVIDERS: ${SCRFD_PROVIDERS:-["CPUExecutionProvider"]}
       FACEID_ADAFACE_DEVICE: ${ADAFACE_DEVICE:-cpu}
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}
+      FACEID_LANGUAGE_EMBEDDING_DEVICE: ${LANGUAGE_EMBEDDING_DEVICE:-cpu}
+      FACEID_LANGUAGE_EMBEDDING_BATCH_SIZE: ${LANGUAGE_EMBEDDING_BATCH_SIZE:-16}
+      HF_HOME: /srv/model-cache
     ports: ["127.0.0.1:8000:8000"]
     # Weights are mounted read-only, never baked into the image or committed.
     # Source images are shared with the worker, which reads what the API wrote.
     volumes:
       - "./models:/srv/models:ro"
       - "object-data:/srv/objects"
+      - "language-model-cache-v2:/srv/model-cache"
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -92,6 +98,27 @@ services:
       - "object-data:/srv/objects"
     networks: [faceid]
 
+  language-worker:
+    image: hawkeye-api:dev
+    command: ["python", "-m", "app.language_worker"]
+    env_file: [.env]
+    environment:
+      FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FACEID_REDIS_DSN: redis://redis:6379/0
+      FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}
+      FACEID_LANGUAGE_EMBEDDING_DEVICE: ${LANGUAGE_EMBEDDING_DEVICE:-cpu}
+      FACEID_LANGUAGE_EMBEDDING_BATCH_SIZE: ${LANGUAGE_EMBEDDING_BATCH_SIZE:-16}
+      HF_HOME: /srv/model-cache
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      qdrant: {condition: service_started}
+    volumes:
+      - "language-model-cache-v2:/srv/model-cache"
+    networks: [faceid]
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -134,3 +161,4 @@ volumes:
   postgres-data:
   redis-data:
   qdrant-data:
+  language-model-cache-v2:

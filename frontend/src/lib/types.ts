@@ -244,6 +244,45 @@ export interface LanguageTransliteration {
   warnings: string[];
 }
 
+export type LanguageDocumentState = "pending" | "processed" | "failed";
+
+export interface LanguageDocument {
+  document_uuid: string;
+  title: string;
+  source: string;
+  original_text: string;
+  normalized_text: string;
+  primary_script: PrimaryScript;
+  content_sha256: string;
+  attributes: Record<string, unknown>;
+  processing_state: LanguageDocumentState;
+  embedding_model: string | null;
+  embedding_version: string | null;
+  vector_collection: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  processed_at: string | null;
+  created: boolean | null;
+  status: "accepted" | "already_exists" | null;
+}
+
+export interface LanguageSearchHit {
+  document_uuid: string;
+  title: string;
+  source: string;
+  text: string;
+  primary_script: PrimaryScript;
+  score: number;
+  attributes: Record<string, unknown>;
+}
+
+export interface LanguageSearchResponse {
+  query: string;
+  model: string;
+  model_version: string;
+  hits: LanguageSearchHit[];
+}
+
 /** The API's structured error envelope. */
 export interface ApiErrorDetail {
   code: string;

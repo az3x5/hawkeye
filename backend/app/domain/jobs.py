@@ -62,6 +62,32 @@ class EmbeddingJob:
             raise JobQueueError(f"malformed embedding job payload: {exc}") from exc
 
 
+@dataclass(frozen=True, slots=True)
+class LanguageEmbeddingJob:
+    """A request to embed one persisted language document."""
+
+    document_uuid: UUID
+    enqueued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def to_payload(self) -> dict[str, str]:
+        """Render the job for transport."""
+        return {
+            "document_uuid": str(self.document_uuid),
+            "enqueued_at": self.enqueued_at.isoformat(),
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, str]) -> LanguageEmbeddingJob:
+        """Rebuild a language job from transport."""
+        try:
+            return cls(
+                document_uuid=UUID(payload["document_uuid"]),
+                enqueued_at=datetime.fromisoformat(payload["enqueued_at"]),
+            )
+        except (KeyError, ValueError) as exc:
+            raise JobQueueError(f"malformed language embedding job payload: {exc}") from exc
+
+
 @runtime_checkable
 class JobQueue(Protocol):
     """A queue of embedding work."""

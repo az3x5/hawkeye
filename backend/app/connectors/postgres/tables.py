@@ -219,3 +219,36 @@ users = Table(
     Column("last_login_at", DateTime(timezone=True), nullable=True),
     comment="Password accounts. Signing in mints a short-lived api_tokens row.",
 )
+
+
+language_documents = Table(
+    "language_documents",
+    metadata,
+    Column("document_uuid", PgUUID(as_uuid=True), primary_key=True),
+    Column("title", String(256), nullable=False),
+    Column("source", String(128), nullable=False),
+    Column("original_text", Text(), nullable=False),
+    Column("normalized_text", Text(), nullable=False),
+    Column("primary_script", String(16), nullable=False),
+    Column("content_sha256", String(64), nullable=False),
+    Column("attributes", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("processing_state", String(32), nullable=False, server_default=text("'pending'")),
+    Column("embedding_model", String(256), nullable=True),
+    Column("embedding_version", String(128), nullable=True),
+    Column("vector_collection", String(255), nullable=True),
+    Column("failure_reason", Text(), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("processed_at", DateTime(timezone=True), nullable=True),
+    UniqueConstraint("source", "content_sha256", name="uq_language_document_source_content"),
+    CheckConstraint(
+        "primary_script IN ('thaana', 'latin', 'mixed', 'none')", name="ck_language_document_script"
+    ),
+    CheckConstraint(
+        "processing_state IN ('pending', 'processed', 'failed')",
+        name="ck_language_document_processing_state",
+    ),
+    CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="ck_language_document_sha256"),
+    Index("ix_language_documents_state", "processing_state"),
+    Index("ix_language_documents_source", "source"),
+    comment="Text documents and model provenance for the semantic language index.",
+)

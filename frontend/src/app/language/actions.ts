@@ -2,12 +2,16 @@
 
 import {
   ApiError,
+  createLanguageDocument,
   NotAuthenticatedError,
   normalizeLanguageText,
+  searchLanguageDocuments,
   transliterateLanguageText,
 } from "@/lib/api";
 import type {
   LanguageNormalization,
+  LanguageDocument,
+  LanguageSearchResponse,
   LanguageTransliteration,
   TransliterationDirection,
 } from "@/lib/types";
@@ -20,6 +24,14 @@ export type NormalizeActionResult =
 
 export type TransliterateActionResult =
   | { ok: true; transliteration: LanguageTransliteration }
+  | Failure;
+
+export type CreateDocumentActionResult =
+  | { ok: true; document: LanguageDocument }
+  | Failure;
+
+export type SearchDocumentsActionResult =
+  | { ok: true; search: LanguageSearchResponse }
   | Failure;
 
 export async function normalizeAction(text: string): Promise<NormalizeActionResult> {
@@ -48,6 +60,43 @@ export async function transliterateAction(
   }
 }
 
+export async function createDocumentAction(body: {
+  title: string;
+  source: string;
+  text: string;
+}): Promise<CreateDocumentActionResult> {
+  if (body.title.trim() === "" || body.source.trim() === "") {
+    return { ok: false, code: "missing_metadata", message: "Title and source are required." };
+  }
+  const invalid = validateDocumentText(body.text);
+  if (invalid !== null) return invalid;
+  try {
+    return { ok: true, document: await createLanguageDocument(body) };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function searchDocumentsAction(body: {
+  text: string;
+  source?: string;
+}): Promise<SearchDocumentsActionResult> {
+  const invalid = validateText(body.text);
+  if (invalid !== null) return invalid;
+  try {
+    return {
+      ok: true,
+      search: await searchLanguageDocuments({
+        text: body.text,
+        limit: 10,
+        source: body.source?.trim() || undefined,
+      }),
+    };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
 function validateText(text: string): Failure | null {
   if (text.trim() === "") {
     return { ok: false, code: "empty_text", message: "Enter some text first." };
@@ -57,6 +106,20 @@ function validateText(text: string): Failure | null {
       ok: false,
       code: "text_too_long",
       message: "Text must contain 20,000 characters or fewer.",
+    };
+  }
+  return null;
+}
+
+function validateDocumentText(text: string): Failure | null {
+  if (text.trim() === "") {
+    return { ok: false, code: "empty_text", message: "Enter document text first." };
+  }
+  if (text.length > 100_000) {
+    return {
+      ok: false,
+      code: "text_too_long",
+      message: "A document must contain 100,000 characters or fewer.",
     };
   }
   return null;

@@ -44,6 +44,12 @@ services:
         limits: {cpus: "8.0", memory: 8g}
     restart: unless-stopped
 
+  language-worker:
+    deploy:
+      resources:
+        limits: {cpus: "4.0", memory: 5g}
+    restart: unless-stopped
+
   postgres:
     deploy:
       resources:

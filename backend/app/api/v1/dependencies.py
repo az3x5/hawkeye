@@ -15,14 +15,15 @@ from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import (
     PostgresConnector,
     SqlAlchemyFaceSampleRepository,
+    SqlAlchemyLanguageDocumentRepository,
     SqlAlchemyPersonRepository,
 )
 from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
 from app.connectors.postgres.queries import ReadQueries
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
 from app.connectors.postgres.users import SqlAlchemyUserStore
-from app.connectors.qdrant import QdrantVectorRepository
-from app.connectors.redis import RedisJobQueue
+from app.connectors.qdrant import QdrantLanguageRepository, QdrantVectorRepository
+from app.connectors.redis import RedisJobQueue, RedisLanguageJobQueue
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
@@ -31,6 +32,7 @@ from app.services.authentication import AuthenticationService
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
+from app.services.language_search import LanguageDocumentService, LanguageSearchService
 
 
 def _postgres(request: Request) -> PostgresConnector:
@@ -171,3 +173,30 @@ async def get_sample_reader(request: Request) -> AsyncIterator[SampleReader]:
     """Build a sample reader bound to one database transaction."""
     async with _postgres(request).session() as session:
         yield SampleReader(SqlAlchemyFaceSampleRepository(session))
+
+
+async def get_language_document_service(
+    request: Request,
+) -> AsyncIterator[LanguageDocumentService]:
+    """Build document ingestion bound to one transaction."""
+    queue = getattr(request.app.state, "language_queue", None)
+    if not isinstance(queue, RedisLanguageJobQueue):
+        raise ServiceUnavailableError("language document ingestion is not available")
+    async with _postgres(request).session() as session:
+        yield LanguageDocumentService(SqlAlchemyLanguageDocumentRepository(session), queue)
+
+
+async def get_language_search_service(
+    request: Request,
+) -> AsyncIterator[LanguageSearchService]:
+    """Build semantic search using the process-wide query embedder."""
+    qdrant = getattr(request.app.state, "qdrant", None)
+    embedder = getattr(request.app.state, "language_embedder", None)
+    if qdrant is None or embedder is None:
+        raise ServiceUnavailableError("language semantic search is not configured")
+    async with _postgres(request).session() as session:
+        yield LanguageSearchService(
+            SqlAlchemyLanguageDocumentRepository(session),
+            QdrantLanguageRepository(qdrant),
+            embedder,
+        )

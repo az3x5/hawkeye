@@ -57,3 +57,9 @@ def test_credentials_store_no_plaintext() -> None:
     assert "token" not in metadata.tables["api_tokens"].c
     assert "password_hash" in metadata.tables["users"].c
     assert "password" not in metadata.tables["users"].c
+
+
+def test_language_vectors_are_attributed_to_model_provenance() -> None:
+    table = metadata.tables["language_documents"]
+    assert {"embedding_model", "embedding_version", "vector_collection"} <= set(table.c.keys())
+    assert "normalized_text" in table.c

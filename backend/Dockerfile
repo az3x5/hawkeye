@@ -20,7 +20,8 @@ RUN useradd --create-home --uid 10001 faceid
 # The object store is a mounted volume. Creating it here, owned by the runtime
 # user, means Docker seeds an empty named volume with this ownership instead of
 # handing the process a root-owned directory it cannot write to.
-RUN mkdir -p /srv/objects && chown -R faceid:faceid /srv/objects
+RUN mkdir -p /srv/objects /srv/model-cache \
+    && chown -R faceid:faceid /srv/objects /srv/model-cache
 USER faceid
 
 EXPOSE 8000

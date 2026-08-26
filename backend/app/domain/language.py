@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
+from uuid import UUID, uuid4
+
+from app.domain.jobs import ProcessingState
 
 
 class Script(StrEnum):
@@ -60,3 +66,37 @@ class Transliteration:
     direction: TransliterationDirection
     model_version: str
     warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LanguageDocument:
+    """A searchable text document and its observable processing state."""
+
+    title: str
+    source: str
+    original_text: str
+    normalized_text: str
+    primary_script: PrimaryScript
+    content_sha256: str
+    attributes: dict[str, Any]
+    document_uuid: UUID = dataclass_field(default_factory=uuid4)
+    processing_state: ProcessingState = ProcessingState.PENDING
+    embedding_model: str | None = None
+    embedding_version: str | None = None
+    vector_collection: str | None = None
+    failure_reason: str | None = None
+    created_at: datetime = dataclass_field(default_factory=lambda: datetime.now(UTC))
+    processed_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LanguageSearchHit:
+    """A semantically similar document returned from the language index."""
+
+    document_uuid: UUID
+    title: str
+    source: str
+    text: str
+    primary_script: PrimaryScript
+    score: float
+    attributes: dict[str, Any]
