@@ -179,9 +179,7 @@ class Settings(BaseSettings):
     def validate_job_retry_window(self) -> Settings:
         """Reject a retry ceiling smaller than the initial delay."""
         if self.job_retry_max_seconds < self.job_retry_base_seconds:
-            raise ValueError(
-                "job_retry_max_seconds must be at least job_retry_base_seconds"
-            )
+            raise ValueError("job_retry_max_seconds must be at least job_retry_base_seconds")
         return self
 
     @property

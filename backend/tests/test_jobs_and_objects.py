@@ -190,10 +190,7 @@ class TestRedisJobQueue:
         with pytest.raises(JobQueueError, match="could not decode"):
             await queue.reserve(timeout_seconds=1)
 
-
-    async def test_cutover_recovers_in_flight_work_without_loss(
-        self, queue: RedisJobQueue
-    ) -> None:
+    async def test_cutover_recovers_in_flight_work_without_loss(self, queue: RedisJobQueue) -> None:
         job = _job()
         await queue.enqueue(job)
         assert await queue.reserve(timeout_seconds=1) == job
@@ -204,6 +201,7 @@ class TestRedisJobQueue:
         migrated = await queue.reserve_nowait()
         assert migrated == job
         await queue.complete(job)
+
 
 def test_embedding_job_equality_ignores_nothing() -> None:
     now = datetime.now(UTC)
