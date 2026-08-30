@@ -13,6 +13,7 @@ import pytest
 from app.api.v1 import metrics
 from app.core.config import Settings
 from app.domain.auth import Principal
+from app.domain.processing import JobStatus, ProcessingMetrics
 
 
 def test_memory_usage_reads_available_host_memory(
@@ -71,9 +72,25 @@ async def test_metrics_endpoint_returns_declared_schema(
         scopes=frozenset(),
     )
 
-    result = await metrics.system_metrics(principal)
+    processing = ProcessingMetrics(
+        by_status={JobStatus.QUEUED: 4, JobStatus.RETRY: 1},
+        queue_depth=5,
+        oldest_queued_age_seconds=12.5,
+        active_leases=2,
+        expired_leases=0,
+        completed_last_minute=7,
+        attempts_last_minute=9,
+        live_workers=3,
+    )
+
+    result = await metrics.system_metrics(principal, processing)
 
     body = metrics.SystemMetricsResponse.model_validate(result)
     assert body.cpu_percent == 42.5
     assert body.cpu_count == 16
     assert body.gpus == []
+    assert body.processing is not None
+    assert body.processing.counts == {"queued": 4, "retry": 1}
+    assert body.processing.queue_depth == 5
+    assert body.processing.completed_last_minute == 7
+    assert body.processing.live_workers == 3

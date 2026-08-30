@@ -191,6 +191,20 @@ class TestRedisJobQueue:
             await queue.reserve(timeout_seconds=1)
 
 
+    async def test_cutover_recovers_in_flight_work_without_loss(
+        self, queue: RedisJobQueue
+    ) -> None:
+        job = _job()
+        await queue.enqueue(job)
+        assert await queue.reserve(timeout_seconds=1) == job
+        assert await queue.in_flight() == 1
+        assert await queue.recover_in_flight() == 1
+        assert await queue.in_flight() == 0
+        assert await queue.depth() == 1
+        migrated = await queue.reserve_nowait()
+        assert migrated == job
+        await queue.complete(job)
+
 def test_embedding_job_equality_ignores_nothing() -> None:
     now = datetime.now(UTC)
     sample, person = uuid4(), uuid4()

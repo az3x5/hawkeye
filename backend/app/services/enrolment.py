@@ -13,7 +13,7 @@ from datetime import datetime
 from uuid import UUID
 
 from app.connectors.filesystem.object_store import sha256_bytes
-from app.domain.jobs import EmbeddingJob, JobQueue, ObjectStore, ProcessingState
+from app.domain.jobs import EmbeddingJob, EmbeddingJobSubmitter, ObjectStore, ProcessingState
 from app.domain.models import (
     DomainValidationError,
     ExternalIdentifier,
@@ -118,7 +118,7 @@ class EnrolmentService:
         people: PersonRepository,
         samples: FaceSampleRepository,
         objects: ObjectStore,
-        queue: JobQueue,
+        queue: EmbeddingJobSubmitter,
     ) -> None:
         """Wire the service to its collaborators."""
         self._people = people

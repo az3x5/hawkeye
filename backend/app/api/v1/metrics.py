@@ -12,10 +12,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.api.v1.dependencies import get_processing_metrics
 from app.api.v1.security import get_principal
 from app.core.config import Settings, get_settings
 from app.core.errors import ErrorResponse
 from app.domain.auth import Principal
+from app.domain.processing import ProcessingMetrics
 
 router = APIRouter(tags=["system"])
 
@@ -39,6 +41,19 @@ class GpuUsage(BaseModel):
     memory: CapacityUsage
 
 
+class ProcessingMetricsResponse(BaseModel):
+    """Durable job pressure, lease health, and recent throughput."""
+
+    counts: dict[str, int]
+    queue_depth: int = Field(ge=0)
+    oldest_queued_age_seconds: float | None = Field(default=None, ge=0)
+    active_leases: int = Field(ge=0)
+    expired_leases: int = Field(ge=0)
+    completed_last_minute: int = Field(ge=0)
+    attempts_last_minute: int = Field(ge=0)
+    live_workers: int = Field(ge=0)
+
+
 class SystemMetricsResponse(BaseModel):
     """Current resource pressure as seen by the serving host."""
 
@@ -49,10 +64,25 @@ class SystemMetricsResponse(BaseModel):
     disk: CapacityUsage
     gpus: list[GpuUsage] = Field(default_factory=list)
     gpu_error: str | None = None
+    processing: ProcessingMetricsResponse | None = None
 
 
 def _percent(used: int, total: int) -> float:
     return round(min(max(used / total * 100, 0.0), 100.0), 1)
+
+
+def _processing_response(value: ProcessingMetrics) -> ProcessingMetricsResponse:
+    """Translate domain metrics without leaking connector-specific types."""
+    return ProcessingMetricsResponse(
+        counts={status.value: count for status, count in value.by_status.items()},
+        queue_depth=value.queue_depth,
+        oldest_queued_age_seconds=value.oldest_queued_age_seconds,
+        active_leases=value.active_leases,
+        expired_leases=value.expired_leases,
+        completed_last_minute=value.completed_last_minute,
+        attempts_last_minute=value.attempts_last_minute,
+        live_workers=value.live_workers,
+    )
 
 
 def _cpu_times() -> tuple[int, int]:
@@ -175,6 +205,8 @@ async def collect_system_metrics(settings: Settings) -> SystemMetricsResponse:
 )
 async def system_metrics(
     _principal: Annotated[Principal, Depends(get_principal)],
+    processing: Annotated[ProcessingMetrics, Depends(get_processing_metrics)],
 ) -> SystemMetricsResponse:
-    """Report CPU, memory, retained-image disk and optional NVIDIA GPU usage."""
-    return await collect_system_metrics(get_settings())
+    """Report host resources together with durable processing pressure."""
+    resources = await collect_system_metrics(get_settings())
+    return resources.model_copy(update={"processing": _processing_response(processing)})

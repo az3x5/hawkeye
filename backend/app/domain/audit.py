@@ -30,6 +30,8 @@ class AuditAction(StrEnum):
     ACCOUNT_ENABLED = "account_enabled"
     TOKEN_ISSUED = "token_issued"  # noqa: S105 - an action name
     TOKEN_REVOKED = "token_revoked"  # noqa: S105 - an action name
+    PROCESSING_JOB_RETRIED = "processing_job_retried"
+    PROCESSING_JOB_CANCELLED = "processing_job_cancelled"
 
 
 @dataclass(frozen=True, slots=True)

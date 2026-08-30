@@ -18,6 +18,7 @@ from app.api.v1.language import router as language_router
 from app.api.v1.me import router as me_router
 from app.api.v1.metrics import router as metrics_router
 from app.api.v1.persons import router as person_router
+from app.api.v1.processing_jobs import router as processing_job_router
 from app.api.v1.sessions import router as session_router
 from app.connectors.filesystem import FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
@@ -133,7 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(logging.DEBUG if settings.debug else logging.INFO)
 
     app = FastAPI(
-        title="Hawkeye - Person Intelligence Face ID",
+        title="EagleEye - Multimodal Intelligence",
         version="0.1.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url=None,
@@ -144,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix=settings.api_v1_prefix)
     app.include_router(metrics_router, prefix=settings.api_v1_prefix)
     app.include_router(enrolment_router, prefix=settings.api_v1_prefix)
+    app.include_router(processing_job_router, prefix=settings.api_v1_prefix)
     app.include_router(identification_router, prefix=settings.api_v1_prefix)
     app.include_router(language_router, prefix=settings.api_v1_prefix)
     app.include_router(person_router, prefix=settings.api_v1_prefix)

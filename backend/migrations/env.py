@@ -14,8 +14,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
+from app.connectors.postgres import metadata
 from app.connectors.postgres.connector import _as_asyncpg_dsn
-from app.connectors.postgres.tables import metadata
 from app.core.config import get_settings
 
 config = context.config

@@ -86,6 +86,18 @@ export interface GpuUsage {
   memory: CapacityUsage;
 }
 
+
+export interface ProcessingMetrics {
+  counts: Record<string, number>;
+  queue_depth: number;
+  oldest_queued_age_seconds: number | null;
+  active_leases: number;
+  expired_leases: number;
+  completed_last_minute: number;
+  attempts_last_minute: number;
+  live_workers: number;
+}
+
 export interface SystemMetrics {
   collected_at: string;
   cpu_percent: number;
@@ -94,6 +106,7 @@ export interface SystemMetrics {
   disk: CapacityUsage;
   gpus: GpuUsage[];
   gpu_error: string | null;
+  processing: ProcessingMetrics | null;
 }
 
 export interface Paged<T> {

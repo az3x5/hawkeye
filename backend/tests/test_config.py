@@ -36,3 +36,14 @@ def test_no_credentials_are_defaulted_in_code(monkeypatch: pytest.MonkeyPatch) -
         monkeypatch.setenv(key, value)
     settings = Settings()  # type: ignore[call-arg]
     assert settings.qdrant_api_key is None
+
+
+def test_retry_ceiling_cannot_be_below_initial_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key, value in TEST_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("FACEID_JOB_RETRY_BASE_SECONDS", "60")
+    monkeypatch.setenv("FACEID_JOB_RETRY_MAX_SECONDS", "30")
+    with pytest.raises(ValidationError, match="job_retry_max_seconds"):
+        Settings()  # type: ignore[call-arg]

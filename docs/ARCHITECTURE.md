@@ -1,4 +1,4 @@
-# Hawkeye — Architecture
+# EagleEye — Architecture
 
 This document describes the target design. Sections marked **(planned)** are
 not implemented yet; `IMPLEMENTATION_STATUS.md` is the authority on what
@@ -176,10 +176,9 @@ Implemented so far: the PostgreSQL metadata store and the Qdrant vector store.
 
 | Store | Holds | Notes |
 | --- | --- | --- |
-| PostgreSQL | people, external identifiers, face samples (built); embedding metadata, audit log (planned) | system of record |
-| — | embeddings exist in memory only until Phase 4 wires Qdrant | |
+| PostgreSQL | identity metadata, embedding provenance, audit, language metadata, durable processing jobs and attempts | system of record |
 | Qdrant | embedding vectors, one collection per provenance triple | internal network only |
-| Redis | job queue and transient state | not a system of record |
+| Redis | rate limiting and legacy queue cutover only | never job truth |
 | Object store | source images / face crops | via a connector |
 
 Every stored embedding records `model_name`, `model_version` and
@@ -276,26 +275,64 @@ enqueues. Detection and recognition happen in a worker. Two reasons — a slow o
 failing model must not fail the caller's write, and the models are far too
 heavy to load into every web process.
 
-```
+```text
 POST /enrolments ──▶ object store (image, by content hash)
-                 ──▶ postgres (person, sample: pending)
-                 ──▶ redis queue (identifiers only, never pixels)
-                                    │
-                          worker ◀──┘
-                            ├─ detect + align (SCRFD)
-                            ├─ embed (AdaFace)
-                            ├─ qdrant (vector)
-                            └─ postgres (sample: processed | failed)
+                 ──▶ one PostgreSQL transaction
+                       ├─ person/sample metadata (`pending`)
+                       ├─ processing job (`queued`)
+                       └─ outbox event (`processing.job.queued`)
+                                      │
+                     worker claim ◀───┘  FOR UPDATE SKIP LOCKED
+                       ├─ bounded lease + fencing token
+                       ├─ detect + align (SCRFD)
+                       ├─ embed (AdaFace)
+                       ├─ qdrant (vector)
+                       └─ one outcome transaction
+                            ├─ sample: processed | failed
+                            ├─ job: completed | queued | dead_letter
+                            ├─ immutable attempt result
+                            └─ transition outbox event
 ```
 
-The queue payload carries `face_sample_uuid`, `person_uuid`, `image_sha256` and
-a timestamp — never image bytes and never a vector. The worker fetches the
-image from the object store itself.
+The durable payload carries opaque identifiers such as `face_sample_uuid`,
+`person_uuid`, and `image_sha256`—never pixels, vectors, raw document text,
+tokens, or secrets. The worker loads source content through its storage
+connector. Language indexing uses the same envelope and lifecycle.
 
-Jobs are reserved rather than popped: `BLMOVE` moves a job to an in-flight list
-and it is deleted only once the outcome is reported, so a worker that dies
-mid-job leaves the job visible instead of losing it. Failed jobs are kept with
-their reason — a job that could not be processed is evidence, not noise.
+Claims use `FOR UPDATE SKIP LOCKED`, so workers do not claim the same row.
+Every claim creates an attempt and receives a fencing token. A worker may
+complete or fail only while it still owns an unexpired lease with that token.
+Expired leases return to claimable work; exhausted retry budgets enter
+`dead_letter`. Operator retry and cancellation are admin-scoped and audited.
+
+Redis queues are no longer used for new work. At worker startup, legacy ready
+and in-flight lists are recovered and converted into idempotent PostgreSQL
+jobs. Redis remains the rate-limit store and can later accelerate notification,
+but losing it cannot erase authoritative processing state.
+
+### Durable processing state
+
+`processing.jobs` is the current state; `processing.job_attempts` is immutable
+attempt history; `processing.worker_heartbeats` makes worker liveness visible;
+and `processing.outbox_events` records transitions in the same transaction as
+the state change. An external relay is not enabled yet—the outbox is the safe
+boundary for future BlackGlass or managed-queue delivery.
+
+The state flow is:
+
+```text
+queued ──claim──> running ──complete──> completed
+  ▲                  │
+  │                  ├─retryable failure──> queued (available after backoff)
+  │                  ├─attempts exhausted─> dead_letter
+  │                  └─lease expires───────> queued on the next claim cycle
+  └────operator retry──── failed/dead_letter/cancelled
+
+queued/running ──operator cancel──> cancelled
+```
+
+See `docs/PROCESSING_JOBS.md` for transition rules, metrics, alerts, and the
+operator recovery runbook.
 
 An image containing more than one face is **refused, not guessed**. Which face
 belongs to the enrolling person is an identity question, and the worker has no

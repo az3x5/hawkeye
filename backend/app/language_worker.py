@@ -4,18 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
+import socket
 
 from app.connectors.postgres import (
     PostgresConnector,
+    PostgresJobConsumer,
     SqlAlchemyLanguageDocumentRepository,
 )
 from app.connectors.qdrant import QdrantConnector, QdrantLanguageRepository
 from app.connectors.redis import RedisConnector, RedisLanguageJobQueue
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
-from app.domain.jobs import LanguageEmbeddingJob
+from app.domain.jobs import JobQueueError, LanguageEmbeddingJob
+from app.domain.processing import (
+    JobErrorCode,
+    JobLeaseError,
+    JobReservation,
+    JobStatus,
+    ProcessingJob,
+)
 from app.services.language_embeddings import MultilingualE5Embedder, chunk_text
+from app.services.processing import (
+    LANGUAGE_EMBEDDING_PIPELINE,
+    LANGUAGE_EMBEDDING_PIPELINE_VERSION,
+)
 
 logger = logging.getLogger(__name__)
 RESERVE_TIMEOUT_SECONDS = 5
@@ -28,6 +42,7 @@ class LanguageEmbeddingWorker:
         """Build connectors and load the configured embedding model once."""
         if not settings.language_embedding_model:
             raise ValueError("FACEID_LANGUAGE_EMBEDDING_MODEL is required")
+        self._settings = settings
         self._postgres = PostgresConnector(str(settings.postgres_dsn))
         self._qdrant = QdrantConnector(settings.qdrant_url, api_key=settings.qdrant_api_key)
         self._redis = RedisConnector(str(settings.redis_dsn))
@@ -40,6 +55,16 @@ class LanguageEmbeddingWorker:
             batch_size=settings.language_embedding_batch_size,
             max_tokens=settings.language_embedding_max_tokens,
         )
+        worker_id = f"eagleeye:language:{socket.gethostname()}:{os.getpid()}"
+        self._jobs = PostgresJobConsumer(
+            self._postgres,
+            pipeline=LANGUAGE_EMBEDDING_PIPELINE,
+            worker_id=worker_id,
+            lease_seconds=settings.job_lease_seconds,
+            retry_base_seconds=settings.job_retry_base_seconds,
+            retry_max_seconds=settings.job_retry_max_seconds,
+        )
+        self._poll_interval = settings.job_poll_interval_seconds
         self._stopping = asyncio.Event()
 
     async def start(self) -> None:
@@ -47,6 +72,7 @@ class LanguageEmbeddingWorker:
         await self._postgres.ping()
         await self._qdrant.ping()
         await self._redis.ping()
+        await self._migrate_legacy_jobs()
         logger.info(
             "language embedding worker ready",
             extra={
@@ -66,14 +92,66 @@ class LanguageEmbeddingWorker:
         await self._postgres.close()
 
     async def run(self) -> None:
-        """Process jobs until stopped."""
+        """Process durable language jobs until stopped."""
         while not self._stopping.is_set():
-            job = await self._queue.reserve(timeout_seconds=RESERVE_TIMEOUT_SECONDS)
-            if job is not None:
-                await self.process(job)
+            reservation = await self._jobs.reserve()
+            if reservation is None:
+                await asyncio.sleep(self._poll_interval)
+                continue
+            await self._process_reservation(reservation)
 
-    async def process(self, job: LanguageEmbeddingJob) -> None:
-        """Embed one document while preserving failure evidence."""
+    async def _process_reservation(self, reservation: JobReservation) -> None:
+        """Validate the durable envelope before embedding text."""
+        try:
+            payload = reservation.job.payload
+            if not all(
+                isinstance(key, str) and isinstance(value, str) for key, value in payload.items()
+            ):
+                raise JobQueueError("language job payload values must be strings")
+            job = LanguageEmbeddingJob.from_payload(payload)
+        except JobQueueError as exc:
+            await self._jobs.fail(
+                reservation,
+                error_code=JobErrorCode.INVALID_MEDIA,
+                detail=str(exc),
+                retryable=False,
+            )
+            return
+        await self.process(job, reservation=reservation)
+
+    async def _migrate_legacy_jobs(self) -> None:
+        """Drain pre-M1 Redis work into PostgreSQL without losing reservations."""
+        recovered = await self._queue.recover_in_flight()
+        migrated = 0
+        while True:
+            job = await self._queue.reserve_nowait()
+            if job is None:
+                break
+            await self._jobs.enqueue_legacy(
+                ProcessingJob(
+                    pipeline=LANGUAGE_EMBEDDING_PIPELINE,
+                    pipeline_version=LANGUAGE_EMBEDDING_PIPELINE_VERSION,
+                    subject_type="language_document",
+                    subject_uuid=job.document_uuid,
+                    idempotency_key=(f"{job.document_uuid}:{LANGUAGE_EMBEDDING_PIPELINE_VERSION}"),
+                    payload=job.to_payload(),
+                    max_attempts=self._settings.job_max_attempts,
+                    queued_at=job.enqueued_at,
+                    available_at=job.enqueued_at,
+                )
+            )
+            await self._queue.complete(job)
+            migrated += 1
+        if recovered or migrated:
+            logger.info(
+                "legacy language jobs migrated",
+                extra={"recovered": recovered, "migrated": migrated},
+            )
+
+    async def process(
+        self, job: LanguageEmbeddingJob, *, reservation: JobReservation | None = None
+    ) -> None:
+        """Embed one document while preserving durable failure evidence."""
         try:
             async with self._postgres.session() as session:
                 document = await SqlAlchemyLanguageDocumentRepository(session).get(
@@ -100,13 +178,37 @@ class LanguageEmbeddingWorker:
                 extra={"document_uuid": str(job.document_uuid)},
             )
             reason = f"{type(exc).__name__}: {exc}"
-            async with self._postgres.session() as session:
-                repository = SqlAlchemyLanguageDocumentRepository(session)
-                if await repository.get(job.document_uuid) is not None:
-                    await repository.mark_failed(job.document_uuid, reason)
-            await self._queue.fail(job, reason)
+            retryable = not isinstance(exc, KeyError)
+            result: JobStatus | None = None
+            if reservation is not None:
+                result = await self._jobs.fail(
+                    reservation,
+                    error_code=(
+                        JobErrorCode.INTERNAL_ERROR
+                        if retryable
+                        else JobErrorCode.SOURCE_UNAVAILABLE
+                    ),
+                    detail=reason,
+                    retryable=retryable,
+                )
+            if result is not JobStatus.RETRY:
+                async with self._postgres.session() as session:
+                    repository = SqlAlchemyLanguageDocumentRepository(session)
+                    if await repository.get(job.document_uuid) is not None:
+                        await repository.mark_failed(job.document_uuid, reason)
+            if reservation is None:
+                await self._queue.fail(job, reason)
         else:
-            await self._queue.complete(job)
+            try:
+                if reservation is None:
+                    await self._queue.complete(job)
+                else:
+                    await self._jobs.complete(reservation)
+            except JobLeaseError:
+                logger.warning(
+                    "language job completed after its lease was lost",
+                    extra={"document_uuid": str(job.document_uuid)},
+                )
             logger.info(
                 "language document embedded",
                 extra={

@@ -89,6 +89,24 @@ class LanguageEmbeddingJob:
 
 
 @runtime_checkable
+class EmbeddingJobSubmitter(Protocol):
+    """Submission boundary for face embedding work."""
+
+    async def enqueue(self, job: EmbeddingJob) -> None:
+        """Persist one face job idempotently."""
+        ...
+
+
+@runtime_checkable
+class LanguageJobSubmitter(Protocol):
+    """Submission boundary for language embedding work."""
+
+    async def enqueue(self, job: LanguageEmbeddingJob) -> None:
+        """Persist one language job idempotently."""
+        ...
+
+
+@runtime_checkable
 class JobQueue(Protocol):
     """A queue of embedding work."""
 

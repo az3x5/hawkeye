@@ -48,6 +48,26 @@ class RedisJobQueue:
         # decode_responses=True is set on the client, so this is always str.
         return self._decode(raw if isinstance(raw, str) else raw.decode())
 
+    async def reserve_nowait(self) -> EmbeddingJob | None:
+        """Move one legacy waiting job without blocking."""
+        raw = await self._connector.client.lmove(
+            PENDING_KEY, IN_FLIGHT_KEY, src="RIGHT", dest="LEFT"
+        )
+        if raw is None:
+            return None
+        return self._decode(raw if isinstance(raw, str) else raw.decode())
+
+    async def recover_in_flight(self) -> int:
+        """Return legacy reservations to pending during the M1 cutover."""
+        recovered = 0
+        while True:
+            raw = await self._connector.client.lmove(
+                IN_FLIGHT_KEY, PENDING_KEY, src="RIGHT", dest="LEFT"
+            )
+            if raw is None:
+                return recovered
+            recovered += 1
+
     async def complete(self, job: EmbeddingJob) -> None:
         """Drop a finished job from the in-flight list."""
         await self._connector.client.lrem(IN_FLIGHT_KEY, 1, self._encode(job))

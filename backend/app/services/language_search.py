@@ -9,8 +9,7 @@ from uuid import UUID
 
 from app.connectors.postgres.language import SqlAlchemyLanguageDocumentRepository
 from app.connectors.qdrant.language import QdrantLanguageRepository
-from app.connectors.redis.language_queue import RedisLanguageJobQueue
-from app.domain.jobs import LanguageEmbeddingJob, ProcessingState
+from app.domain.jobs import LanguageEmbeddingJob, LanguageJobSubmitter, ProcessingState
 from app.domain.language import LanguageDocument, LanguageSearchHit
 from app.services.language import normalize_text
 from app.services.language_embeddings import LanguageEmbedder
@@ -32,7 +31,7 @@ class LanguageDocumentService:
     def __init__(
         self,
         documents: SqlAlchemyLanguageDocumentRepository,
-        queue: RedisLanguageJobQueue,
+        queue: LanguageJobSubmitter,
     ) -> None:
         """Bind document metadata and its reliable queue."""
         self._documents = documents
@@ -52,10 +51,6 @@ class LanguageDocumentService:
             attributes=request.attributes,
         )
         stored, created = await self._documents.add(document)
-        if created:
-            # The worker may reserve immediately, so the document must be
-            # visible before publishing its identifier to Redis.
-            await self._documents.commit()
         if stored.processing_state is ProcessingState.PENDING:
             await self._queue.enqueue(LanguageEmbeddingJob(stored.document_uuid))
         return stored, created

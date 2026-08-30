@@ -63,3 +63,23 @@ def test_language_vectors_are_attributed_to_model_provenance() -> None:
     table = metadata.tables["language_documents"]
     assert {"embedding_model", "embedding_version", "vector_collection"} <= set(table.c.keys())
     assert "normalized_text" in table.c
+
+
+def test_processing_state_is_isolated_in_its_own_schema() -> None:
+    assert {
+        "processing.jobs",
+        "processing.job_attempts",
+        "processing.outbox_events",
+        "processing.worker_heartbeats",
+    } <= set(metadata.tables)
+
+
+def test_processing_attempts_cascade_from_their_job() -> None:
+    attempts = metadata.tables["processing.job_attempts"]
+    job_uuid = next(iter(attempts.c.job_uuid.foreign_keys))
+    assert job_uuid.ondelete == "CASCADE"
+
+
+def test_processing_jobs_have_no_binary_column() -> None:
+    jobs = metadata.tables["processing.jobs"]
+    assert not {"image", "media", "embedding", "content"} & set(jobs.c.keys())

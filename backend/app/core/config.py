@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn
+from pydantic import Field, PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,6 +42,24 @@ class Settings(BaseSettings):
     object_store_root: Path = Field(
         default=Path("/srv/objects"),
         description="Directory the filesystem object store writes beneath.",
+    )
+
+    # Durable processing policy. PostgreSQL owns state and leases; workers poll
+    # briefly so a lost transport notification can never strand work.
+    job_lease_seconds: int = Field(
+        default=300, ge=30, le=3600, description="Worker lease duration per attempt."
+    )
+    job_poll_interval_seconds: float = Field(
+        default=0.5, ge=0.1, le=30, description="Idle durable-queue polling interval."
+    )
+    job_max_attempts: int = Field(
+        default=3, ge=1, le=20, description="Automatic attempts before dead letter."
+    )
+    job_retry_base_seconds: int = Field(
+        default=5, ge=1, le=3600, description="Initial retry delay."
+    )
+    job_retry_max_seconds: int = Field(
+        default=300, ge=1, le=86400, description="Maximum retry delay."
     )
 
     # Identity decision policy. Deliberately has NO defaults: a matching
@@ -156,6 +174,15 @@ class Settings(BaseSettings):
     language_embedding_device: str = Field(default="cpu", min_length=1)
     language_embedding_batch_size: int = Field(default=16, ge=1, le=256)
     language_embedding_max_tokens: int = Field(default=512, ge=32, le=8192)
+
+    @model_validator(mode="after")
+    def validate_job_retry_window(self) -> Settings:
+        """Reject a retry ceiling smaller than the initial delay."""
+        if self.job_retry_max_seconds < self.job_retry_base_seconds:
+            raise ValueError(
+                "job_retry_max_seconds must be at least job_retry_base_seconds"
+            )
+        return self
 
     @property
     def debug(self) -> bool:

@@ -17,22 +17,28 @@ from app.connectors.postgres import (
     SqlAlchemyFaceSampleRepository,
     SqlAlchemyLanguageDocumentRepository,
     SqlAlchemyPersonRepository,
+    SqlAlchemyProcessingJobRepository,
 )
 from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
 from app.connectors.postgres.queries import ReadQueries
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
 from app.connectors.postgres.users import SqlAlchemyUserStore
 from app.connectors.qdrant import QdrantLanguageRepository, QdrantVectorRepository
-from app.connectors.redis import RedisJobQueue, RedisLanguageJobQueue
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
+from app.domain.processing import ProcessingMetrics
 from app.services.administration import AccountAdministration, TokenAdministration
 from app.services.authentication import AuthenticationService
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
 from app.services.language_search import LanguageDocumentService, LanguageSearchService
+from app.services.processing import (
+    FaceJobSubmitter,
+    LanguageJobSubmitter,
+    ProcessingJobAdministration,
+)
 
 
 def _postgres(request: Request) -> PostgresConnector:
@@ -45,16 +51,17 @@ def _postgres(request: Request) -> PostgresConnector:
 async def get_enrolment_service(request: Request) -> AsyncIterator[EnrolmentService]:
     """Build an enrolment service bound to one database transaction."""
     objects = getattr(request.app.state, "objects", None)
-    queue = getattr(request.app.state, "queue", None)
-    if not isinstance(objects, FilesystemObjectStore) or not isinstance(queue, RedisJobQueue):
+    if not isinstance(objects, FilesystemObjectStore):
         raise ServiceUnavailableError("enrolment is not available")
 
     async with _postgres(request).session() as session:
+        settings: Settings = request.app.state.settings
+        jobs = SqlAlchemyProcessingJobRepository(session)
         yield EnrolmentService(
             people=SqlAlchemyPersonRepository(session),
             samples=SqlAlchemyFaceSampleRepository(session),
             objects=objects,
-            queue=queue,
+            queue=FaceJobSubmitter(jobs, max_attempts=settings.job_max_attempts),
         )
 
 
@@ -179,11 +186,15 @@ async def get_language_document_service(
     request: Request,
 ) -> AsyncIterator[LanguageDocumentService]:
     """Build document ingestion bound to one transaction."""
-    queue = getattr(request.app.state, "language_queue", None)
-    if not isinstance(queue, RedisLanguageJobQueue):
-        raise ServiceUnavailableError("language document ingestion is not available")
     async with _postgres(request).session() as session:
-        yield LanguageDocumentService(SqlAlchemyLanguageDocumentRepository(session), queue)
+        settings: Settings = request.app.state.settings
+        yield LanguageDocumentService(
+            SqlAlchemyLanguageDocumentRepository(session),
+            LanguageJobSubmitter(
+                SqlAlchemyProcessingJobRepository(session),
+                max_attempts=settings.job_max_attempts,
+            ),
+        )
 
 
 async def get_language_search_service(
@@ -200,3 +211,30 @@ async def get_language_search_service(
             QdrantLanguageRepository(qdrant),
             embedder,
         )
+
+
+async def get_processing_job_administration(
+    request: Request,
+) -> AsyncIterator[ProcessingJobAdministration]:
+    """Build durable job administration in one audited transaction."""
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        yield ProcessingJobAdministration(
+            SqlAlchemyProcessingJobRepository(
+                session,
+                retry_base_seconds=settings.job_retry_base_seconds,
+                retry_max_seconds=settings.job_retry_max_seconds,
+            ),
+            SqlAlchemyAuditLog(session),
+        )
+
+
+async def get_processing_metrics(request: Request) -> ProcessingMetrics:
+    """Read live durable queue pressure in a short transaction."""
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        return await SqlAlchemyProcessingJobRepository(
+            session,
+            retry_base_seconds=settings.job_retry_base_seconds,
+            retry_max_seconds=settings.job_retry_max_seconds,
+        ).metrics(live_worker_window_seconds=max(settings.job_lease_seconds * 2, 60))

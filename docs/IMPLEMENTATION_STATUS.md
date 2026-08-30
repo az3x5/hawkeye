@@ -1,10 +1,15 @@
-# Hawkeye — implementation status
+# EagleEye — implementation status
 
 Authoritative record of what is built. One phase at a time; a phase is only
 marked complete when its acceptance criteria have been verified by running
 them.
 
-Last updated: 2026-08-18.
+Last updated: 2026-08-29.
+
+Historical phases below record the verified face-identity build. The newer
+multimodal roadmap is maintained in `MASTER_IMPLEMENTATION_PLAN.md`, and the
+evidence baseline is `REPOSITORY_AUDIT.md`. Legacy Hawkeye/`FACEID_` identifiers
+remain compatibility names, not the name for new product-facing work.
 
 ## Phase 0 — Foundation & Contracts — ✅ COMPLETE
 
@@ -838,3 +843,94 @@ each paginated, each scoped.
   line would be an invention.
 - The audit log gained a read endpoint but no write, edit or delete. It stays
   append-only by construction.
+
+## Phase 15 — Dhivehi language search slice — 🟡 PARTIAL
+
+The repository now contains the first language-intelligence vertical slice:
+Thaana, Latin/Romanized Dhivehi, English, and mixed-script normalization;
+baseline bidirectional transliteration; versioned multilingual E5 embeddings;
+chunked Qdrant indexing; semantic document search; API endpoints; a worker; and
+a frontend language workspace.
+
+This phase is intentionally not marked complete. It lacks a versioned Dhivehi
+retrieval/transliteration benchmark, PostgreSQL chunk/offset persistence,
+citation-ready results, document list/delete/reindex administration, committed
+real-store end-to-end evidence, LLM understanding, and stylometry. Those gaps
+are planned in master Phases M5, M6, M12, and M13.
+
+## Master Phase M0 — Trustworthy baseline and architecture record — ✅ COMPLETE
+
+Selected on 2026-08-28 after the repository-wide audit. This phase changes
+documentation only: it records what is complete/partial/missing/unknown, defines
+the target trust and persistence boundaries, and orders future work by
+dependency. Runtime code, migrations, API contracts, models, and deployment are
+out of scope.
+
+Delivered files:
+
+- `docs/REPOSITORY_AUDIT.md`
+- `docs/MASTER_IMPLEMENTATION_PLAN.md`
+- reconciled README and implementation-status language
+
+Acceptance evidence:
+
+- `git diff --check`: passed.
+- Base plus deployment Docker Compose configuration: passed.
+- Plan schema check: all 19 phases contain every required field.
+- Secret-pattern check over changed documentation: passed; the supplied API key
+  is not present.
+- Backend Ruff and format check: passed (119 files).
+- Backend strict mypy: passed (109 source files).
+- Focused backend contracts: 24 passed, including all 10 language tests.
+- Frontend TypeScript, ESLint, and Vitest: passed (74 tests).
+- Full backend execution was not claimed for M0 because its legacy virtual
+  environment was incomplete; M1 establishes a fresh verified runtime baseline.
+
+## Master Phase M1 — Durable processing core — ✅ COMPLETE
+
+Completed on 2026-08-29. PostgreSQL is now the authoritative job store for
+face enrolment and language indexing. Domain state and job creation are atomic;
+workers claim prioritized jobs with leases and fencing, record immutable
+attempts, retry typed transient failures with bounded backoff, dead-letter
+exhausted work, and publish transactional outbox rows for every transition.
+Redis remains only for rate limiting and conversion of legacy queue entries.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Stable processing domain contract and error taxonomy | `backend/app/domain/processing.py` |
+| Durable tables, repository, claim consumer, metrics and outbox | `backend/app/connectors/postgres/processing_tables.py`, `jobs.py`, `job_queue.py` |
+| Admin job list/detail/summary/retry/cancel with audit | `backend/app/services/processing.py`, `backend/app/api/v1/processing_jobs.py` |
+| Atomic face/language producers and lease-aware workers | enrolment/language services, `worker.py`, `language_worker.py` |
+| Upgrade/downgrade migration | `backend/migrations/versions/79b8c31f4d2a_durable_processing_jobs.py` |
+| Live dashboard processing telemetry | `frontend/src/components/hardware-usage.tsx` |
+| Operator/state-machine documentation | `docs/PROCESSING_JOBS.md` |
+
+### Acceptance evidence
+
+- Clean migration rehearsal: prior head → M1 → prior head → M1 on disposable
+  PostgreSQL; all four `processing` tables were present after upgrade.
+- Focused M1/domain/API integration suite: 42 passed.
+- Redis/object compatibility suite: 30 passed.
+- Real language job: API → PostgreSQL → worker → Qdrant completed with model
+  provenance recorded.
+- Real face job: API → shared object storage → SCRFD/AdaFace worker → Qdrant
+  completed with a 512-dimensional AdaFace embedding and one attempt.
+- A deliberately unavailable face object produced the typed
+  `source_unavailable` failure instead of losing or falsely completing work.
+- Live metrics reported completed/failed counts and two live worker heartbeats.
+- Full backend regression: 526 passed, 62 skipped in 54.68 seconds.
+- Ruff, Python compilation, tracked-secret scan, and Ruff security rules passed.
+- Frontend TypeScript, ESLint, 74 Vitest tests, and production Next.js build
+  passed.
+- Base plus deployment Compose configuration passed.
+- Live localhost checks returned 200 for health/readiness and 401 for an
+  unauthenticated processing-admin request.
+- Strict mypy reached 83 backend modules; only the pre-existing third-party
+  `onnxruntime` and `sentence_transformers` missing-type-metadata errors remain.
+- `pip-audit`, Bandit, and Trivy are not installed, so no dedicated dependency
+  vulnerability scan is claimed.
+
+See `docs/PROCESSING_JOBS.md` for lease, retry, recovery, alerting, cutover, and
+rollback procedures. Master Phase M2 is recommended next; it is not started.

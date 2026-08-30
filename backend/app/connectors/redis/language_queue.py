@@ -60,6 +60,26 @@ class RedisLanguageJobQueue:
             pipe.srem(ACTIVE_KEY, str(job.document_uuid))
             await pipe.execute()
 
+    async def reserve_nowait(self) -> LanguageEmbeddingJob | None:
+        """Move one legacy waiting document without blocking."""
+        raw = await self._connector.client.lmove(
+            PENDING_KEY, IN_FLIGHT_KEY, src="RIGHT", dest="LEFT"
+        )
+        if raw is None:
+            return None
+        return self._decode(raw if isinstance(raw, str) else raw.decode())
+
+    async def recover_in_flight(self) -> int:
+        """Return legacy reservations to pending during the M1 cutover."""
+        recovered = 0
+        while True:
+            raw = await self._connector.client.lmove(
+                IN_FLIGHT_KEY, PENDING_KEY, src="RIGHT", dest="LEFT"
+            )
+            if raw is None:
+                return recovered
+            recovered += 1
+
     async def fail(self, job: LanguageEmbeddingJob, reason: str) -> None:
         """Retain a failed job with its reason."""
         encoded = self._encode(job)

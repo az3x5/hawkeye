@@ -1,18 +1,24 @@
-# Hawkeye
+# EagleEye
 
-Face detection, recognition and identity resolution — the Face ID module of the
+Local-first face identity and multilingual intelligence, evolving into a
 multimodal Person Intelligence platform.
 
-Hawkeye enrols faces, identifies them against what it holds, and puts a human
+EagleEye enrols faces, identifies them against what it holds, and puts a human
 in front of every decision it is not confident enough to make alone. Every
 proposal records the policy that produced it, and every decision is auditable.
+It also includes an initial Dhivehi language workspace for Thaana, Romanized,
+English, and mixed-script normalization, transliteration, embedding, and search.
 
-**Status: Phase 11 (orphaned image reconciliation) complete.** Erasure spans
-metadata, vectors and images, and housekeeping now reconciles leftovers on both
-the vector and image sides — see
-[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for exactly what
-is and is not built, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-design the phases build toward.
+**Status:** historical implementation Phases 0–14 and master Phase M1
+(durable processing) are complete; the Dhivehi language slice is partial. The
+production expansion is governed by the
+[repository audit](docs/REPOSITORY_AUDIT.md) and
+[master implementation plan](docs/MASTER_IMPLEMENTATION_PLAN.md). See
+[implementation status](docs/IMPLEMENTATION_STATUS.md) for verified deliveries
+and [architecture](docs/ARCHITECTURE.md) for the existing face-identity design.
+
+Legacy `Hawkeye`, `FACEID_`, image, and deployment names remain where changing
+them would break compatibility. New product-facing work uses EagleEye.
 
 ## Stack
 
@@ -23,8 +29,9 @@ design the phases build toward.
 | Face recognition | AdaFace IR-101 via PyTorch (CPU) |
 | Metadata | PostgreSQL |
 | Embeddings | Qdrant (one collection per model provenance) |
-| Jobs | Redis |
+| Jobs | PostgreSQL durable jobs; Redis for rate limits and legacy cutover |
 | Frontend | Next.js 16 + React 19 + TypeScript (strict) |
+| Language embeddings | multilingual E5 (current baseline) |
 
 ## Layout
 
@@ -36,7 +43,7 @@ backend/
     adapters/    model adapter seam — the only route to AI models
       scrfd.py, adaface.py, iresnet.py, preprocessing.py, factory.py
     connectors/  storage connector seam — the only route to storage providers
-      postgres/  metadata store: tables, connector, repositories
+      postgres/  metadata and durable jobs: tables, repositories, consumer
     domain/      entities and repository interfaces (no ORM, no HTTP)
     services/    orchestration: enrolment, identification
     worker.py    embedding worker process
@@ -288,6 +295,11 @@ No credential is defaulted in code and `.env` is git-ignored.
 | DELETE | `/api/v1/persons/{uuid}` | Erase a person and their biometric material. Audited, `admin` scope. |
 | GET | `/api/v1/identifications/{uuid}/image` | The submitted query image. |
 | GET | `/api/v1/face-samples/{uuid}/image` | An enrolled sample image. |
+| GET | `/api/v1/processing/jobs` | List durable jobs. `admin` scope. |
+| GET | `/api/v1/processing/jobs/summary` | Queue, lease, failure, throughput and worker summary. `admin` scope. |
+| GET | `/api/v1/processing/jobs/{uuid}` | Read a job and its attempt history. `admin` scope. |
+| POST | `/api/v1/processing/jobs/{uuid}/retry` | Retry failed, dead-letter, or cancelled work. Audited; `admin` scope. |
+| POST | `/api/v1/processing/jobs/{uuid}/cancel` | Cancel queued/running work. Audited; `admin` scope. |
 
 Enrol a face:
 
@@ -451,3 +463,11 @@ actor, the policy in force, and the scores involved.
 | `identifications` | each attempt, its decision, and the thresholds in force at the time |
 | `audit_events` | append-only record of decisions, reviews and purges; no foreign keys, so it outlives what it describes |
 | `api_tokens` | credentials, stored only as SHA-256 hashes, with scopes |
+| `processing.jobs` | authoritative processing state, routing, priority, lease, retry budget, and typed failure |
+| `processing.job_attempts` | immutable claim/outcome history with fencing tokens |
+| `processing.worker_heartbeats` | worker identity, queue, and liveness |
+| `processing.outbox_events` | transactionally recorded processing transition events for future relays |
+
+Job payloads contain opaque identifiers only. The durable state machine,
+recovery behavior, metrics, and operator actions are documented in
+[docs/PROCESSING_JOBS.md](docs/PROCESSING_JOBS.md).

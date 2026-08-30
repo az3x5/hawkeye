@@ -94,7 +94,6 @@ def test_application_exposes_language_contract(settings: Settings) -> None:
 class FakeDocuments:
     def __init__(self) -> None:
         self.stored: dict[object, LanguageDocument] = {}
-        self.committed = False
 
     async def add(self, document: LanguageDocument) -> tuple[LanguageDocument, bool]:
         existing = next(
@@ -111,7 +110,7 @@ class FakeDocuments:
         return document, True
 
     async def commit(self) -> None:
-        self.committed = True
+        raise AssertionError("document and durable job must commit atomically")
 
     async def get_many(self, identifiers: list[object]) -> dict[object, LanguageDocument]:
         return {identifier: self.stored[identifier] for identifier in identifiers}
@@ -120,11 +119,9 @@ class FakeDocuments:
 class FakeQueue:
     def __init__(self, documents: FakeDocuments) -> None:
         self.jobs: list[object] = []
-        self._documents = documents
         self._active: set[object] = set()
 
     async def enqueue(self, job: LanguageEmbeddingJob) -> None:
-        assert self._documents.committed
         identifier = job.document_uuid
         if identifier in self._active:
             return

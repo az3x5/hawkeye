@@ -88,7 +88,7 @@ services:
       FACEID_ADAFACE_TORCH_THREADS: ${WORKER_MODEL_THREADS:-6}
       FACEID_SCRFD_PROVIDERS: ${SCRFD_PROVIDERS:-["CPUExecutionProvider"]}
       FACEID_ADAFACE_DEVICE: ${ADAFACE_DEVICE:-cpu}
-    # No published port: the worker takes work from Redis, not from callers.
+    # No published port: the worker claims durable PostgreSQL jobs, not callers.
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

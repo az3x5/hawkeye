@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Cpu, HardDrive, MemoryStick, Microchip } from "lucide-react";
-import type { CapacityUsage, SystemMetrics } from "@/lib/types";
+import type { CapacityUsage, ProcessingMetrics, SystemMetrics } from "@/lib/types";
 
 const REFRESH_MS = 5_000;
 
@@ -88,10 +88,85 @@ export function HardwareUsage({ initial }: { initial: SystemMetrics | null }) {
           )}
         </div>
       )}
+      {metrics?.processing ? <ProcessingUsage value={metrics.processing} /> : null}
     </section>
   );
 }
 
+
+function ProcessingUsage({ value }: { value: ProcessingMetrics }) {
+  const failed = (value.counts.failed ?? 0) + (value.counts.dead_letter ?? 0);
+  const age =
+    value.oldest_queued_age_seconds === null
+      ? "No queued work"
+      : `Oldest waiting ${formatDuration(value.oldest_queued_age_seconds)}`;
+
+  return (
+    <div className="border-t border-line" aria-labelledby="processing-usage">
+      <div className="px-4 py-3">
+        <h3 id="processing-usage" className="text-sm font-semibold text-ink">
+          Durable processing
+        </h3>
+        <p className="mt-0.5 text-xs text-ink-faint">PostgreSQL queue state from the same live refresh</p>
+      </div>
+      <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard
+          label="Queue depth"
+          value={value.queue_depth}
+          detail={`${value.counts.queued ?? 0} queued · ${value.counts.retry ?? 0} retry`}
+        />
+        <MetricCard
+          label="Active leases"
+          value={value.active_leases}
+          detail={`${value.expired_leases} expired`}
+          warning={value.expired_leases > 0}
+        />
+        <MetricCard
+          label="Failed"
+          value={failed}
+          detail={`${value.counts.dead_letter ?? 0} dead letter`}
+          warning={failed > 0}
+        />
+        <MetricCard
+          label="Completed / min"
+          value={value.completed_last_minute}
+          detail={`${value.attempts_last_minute} attempts`}
+        />
+        <MetricCard label="Live workers" value={value.live_workers} detail={age} />
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  detail,
+  warning = false,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+  warning?: boolean;
+}) {
+  return (
+    <div className="bg-surface p-4">
+      <p className="text-xs font-medium text-ink-muted">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold tabular-nums ${warning ? "text-review" : "text-ink"}`}>
+        {value}
+      </p>
+      <p className="mt-2 truncate text-xs text-ink-faint" title={detail}>
+        {detail}
+      </p>
+    </div>
+  );
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${Math.round(seconds / 3600)}h`;
+}
 type Icon = typeof Cpu;
 
 function UsageCard({
