@@ -66,6 +66,32 @@ def test_thaana_to_latin_baseline_preserves_english() -> None:
     assert result.warnings == ()
 
 
+@pytest.mark.parametrize(
+    ("latin", "thaana"),
+    [
+        ("ii", "އީ"),
+        ("uu", "އޫ"),
+        ("ee", "އޭ"),
+        ("oo", "އޯ"),
+    ],
+)
+def test_phonemic_long_vowels_round_trip(latin: str, thaana: str) -> None:
+    to_thaana = transliterate(latin, TransliterationDirection.LATIN_TO_THAANA)
+    to_latin = transliterate(thaana, TransliterationDirection.THAANA_TO_LATIN)
+
+    assert to_thaana.output == thaana
+    assert to_latin.output == latin
+    assert to_thaana.model_version == "dv-rules-v2"
+    assert to_latin.model_version == "dv-rules-v2"
+
+
+@pytest.mark.parametrize(("alias", "thaana"), [("ey", "އޭ"), ("oa", "އޯ")])
+def test_legacy_long_vowel_aliases_remain_accepted(alias: str, thaana: str) -> None:
+    result = transliterate(alias, TransliterationDirection.LATIN_TO_THAANA)
+
+    assert result.output == thaana
+
+
 @pytest.mark.asyncio
 async def test_normalization_endpoint_returns_declared_contract() -> None:
     principal = Principal(

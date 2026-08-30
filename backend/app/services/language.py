@@ -15,7 +15,7 @@ from app.domain.language import (
 )
 
 NORMALIZER_VERSION = "dv-normalizer-v1"
-TRANSLITERATOR_VERSION = "dv-rules-v1"
+TRANSLITERATOR_VERSION = "dv-rules-v2"
 
 _BIDI_CONTROLS = {
     "\u061c",
@@ -77,13 +77,13 @@ _THAANA_VOWELS = {
     "ަ": "a",
     "ާ": "aa",
     "ި": "i",
-    "ީ": "ee",
+    "ީ": "ii",
     "ު": "u",
-    "ޫ": "oo",
+    "ޫ": "uu",
     "ެ": "e",
-    "ޭ": "ey",
+    "ޭ": "ee",
     "ޮ": "o",
-    "ޯ": "oa",
+    "ޯ": "oo",
     "ް": "",
 }
 _LATIN_CONSONANTS = {
@@ -118,8 +118,12 @@ _LATIN_CONSONANTS = {
 }
 _LATIN_VOWELS = {
     "aa": "ާ",
-    "ee": "ީ",
-    "oo": "ޫ",
+    "ii": "ީ",
+    "uu": "ޫ",
+    "ee": "ޭ",
+    "oo": "ޯ",
+    # Common legacy spellings remain accepted as input aliases. Output is
+    # always the canonical phonemic spelling above.
     "ey": "ޭ",
     "oa": "ޯ",
     "a": "ަ",
@@ -174,7 +178,10 @@ def transliterate(text: str, direction: TransliterationDirection) -> Translitera
         warnings: tuple[str, ...] = ()
     else:
         output = _LATIN_WORD.sub(lambda match: _latin_word_to_thaana(match.group()), normalized)
-        warnings = ("Latin-to-Thaana is phonetic and ambiguous; review names and English words.",)
+        warnings = (
+            "Latin-to-Thaana uses phonemic long vowels (aa/ii/uu/ee/oo) and is "
+            "ambiguous; review names and English words.",
+        )
     return Transliteration(
         original=text,
         output=output,
