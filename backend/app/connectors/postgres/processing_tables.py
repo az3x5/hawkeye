@@ -29,7 +29,7 @@ PROCESSING_SCHEMA = "processing"
 event.listen(
     metadata,
     "before_create",
-    DDL(f"CREATE SCHEMA IF NOT EXISTS {PROCESSING_SCHEMA}"),
+    DDL(f"CREATE SCHEMA IF NOT EXISTS {PROCESSING_SCHEMA}"),  # type: ignore[no-untyped-call]
 )
 
 processing_jobs = Table(

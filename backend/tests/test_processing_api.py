@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -42,16 +43,24 @@ class FakeAdministration:
     async def get(self, job_uuid: UUID) -> ProcessingJob | None:
         return self.jobs.get(job_uuid)
 
-    async def list(self, **kwargs: object) -> ProcessingJobPage:
-        items = list(self.jobs.values())
+    async def list(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        pipeline: str | None,
+        status: JobStatus | None,
+    ) -> ProcessingJobPage:
+        del pipeline, status
+        items = builtins.list(self.jobs.values())
         return ProcessingJobPage(
             items=items,
             total=len(items),
-            limit=int(kwargs["limit"]),
-            offset=int(kwargs["offset"]),
+            limit=limit,
+            offset=offset,
         )
 
-    async def attempts(self, job_uuid: UUID) -> list[dict[str, object]]:
+    async def attempts(self, job_uuid: UUID) -> builtins.list[dict[str, object]]:
         del job_uuid
         return []
 

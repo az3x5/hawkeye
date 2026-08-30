@@ -104,7 +104,7 @@ async def _make_available(connector: PostgresConnector, job_uuid: object) -> Non
 
 async def test_repository_satisfies_the_processing_store_contract(
     connector: PostgresConnector,
-) -> JobReservation | None:
+) -> None:
     async with connector.session() as session:
         assert isinstance(SqlAlchemyProcessingJobRepository(session), ProcessingJobStore)
 
