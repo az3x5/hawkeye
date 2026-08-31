@@ -4,7 +4,7 @@ Authoritative record of what is built. One phase at a time; a phase is only
 marked complete when its acceptance criteria have been verified by running
 them.
 
-Last updated: 2026-08-29.
+Last updated: 2026-08-31.
 
 Historical phases below record the verified face-identity build. The newer
 multimodal roadmap is maintained in `MASTER_IMPLEMENTATION_PLAN.md`, and the
@@ -933,4 +933,84 @@ Redis remains only for rate limiting and conversion of legacy queue entries.
   vulnerability scan is claimed.
 
 See `docs/PROCESSING_JOBS.md` for lease, retry, recovery, alerting, cutover, and
-rollback procedures. Master Phase M2 is recommended next; it is not started.
+rollback procedures.
+
+## Master Phase M2 — First-class media and local object storage — ✅ COMPLETE
+
+Completed on 2026-08-31. Media is now an asset with identity, provenance,
+lineage and a retention veto, rather than a hash mentioned by a face sample.
+Object storage moved behind a bucket-addressed seam with interchangeable
+filesystem and S3 implementations, and the local stack runs against MinIO.
+
+### Delivered
+
+| Item | Location |
+| --- | --- |
+| Bucket/key storage seam, address validation, storage domains | `backend/app/domain/storage.py` |
+| Magic-byte identification, declared-type conflict check, pixel ceiling | `backend/app/domain/content_types.py` |
+| Media assets, provenance, derivatives, retention holds | `backend/app/domain/media.py` |
+| Filesystem and S3/MinIO blob stores | `backend/app/connectors/filesystem/blob_store.py`, `backend/app/connectors/s3/blob_store.py` |
+| Media schema and repository | `backend/app/connectors/postgres/media_tables.py`, `media.py` |
+| Ingestion, retrieval, erasure, holds, sensitive-read audit | `backend/app/services/media.py` |
+| Media API with range reads and scope separation | `backend/app/api/v1/media.py` |
+| Bounded, content-identified enrolment uploads | `backend/app/api/v1/enrolments.py` |
+| Upgrade/downgrade migration | `backend/migrations/versions/c3f7a91d8b40_media_assets.py` |
+| MinIO service, loopback-only, console disabled | `docker-compose.yml` |
+| Grantable `media:read` / `media:write` scopes | `frontend/src/lib/types.ts`, `frontend/src/app/settings/scope-picker.tsx` |
+| Media lifecycle, safety and AWS-mapping documentation | `docs/MEDIA_PIPELINE.md` |
+| AWS SDK loggers held at WARNING | `backend/app/core/logging.py` |
+| MinIO in CI so both storage backends are tested | `.github/workflows/ci.yml` |
+| MinIO unpublished in deployments | `docker-compose.deploy.yml` |
+
+### Acceptance evidence
+
+- Full backend regression against real PostgreSQL, Redis, Qdrant, MinIO and
+  both model weights: **734 passed, 0 skipped** in 78.04 seconds. The prior
+  baseline on the same services was 594 passed, 0 skipped.
+- The blob-store contract suite passes against **both** backends from one set
+  of tests: 44 passed with MinIO configured, 29 passed with 15 skipped when it
+  is not. This is the evidence that the AWS migration is a configuration
+  change rather than a rewrite.
+- Migration rehearsal on a disposable database: 11 upgrades to head, downgrade
+  one, upgrade again, then downgrade all 11 to base — all clean.
+- Identical bytes converge on one asset while both arrivals are retained,
+  verified against real PostgreSQL constraints rather than a fake.
+- Erasure removes the bytes, keeps the row and its content hash, and is
+  refused while a retention hold is active; releasing the hold permits it.
+- A 40-byte PNG declaring 60000×60000 pixels is refused before decoding.
+- A PDF named `photo.jpg` and declared `image/jpeg` is refused by both the
+  media and enrolment intake paths.
+- Authorisation matrix verified: `media:read` does not grant writing,
+  `media:write` does not grant reading, neither grants erasure or holds, and
+  an unrelated scope reaches nothing.
+- Reads of biometric and restricted assets are audited; reads of ordinary
+  media and of metadata alone are not. No audit record carries image bytes.
+- Ruff, Ruff format (145 files) and strict mypy (133 source files) all clean.
+- Frontend TypeScript, ESLint and 74 Vitest tests pass.
+- The API image rebuilt cleanly with the new boto3 dependency (1.76 GB), and
+  the full Compose stack came up on it: `/readyz` reports all five probes
+  healthy including the new `s3` probe, and both media endpoints answer 401
+  without a credential.
+- Base, dev and deploy Compose configurations validate. Under the deploy
+  overlay only `api` and `frontend` publish ports; MinIO, Postgres, Redis and
+  Qdrant publish none.
+- botocore logged every S3 request and response at DEBUG, headers included.
+  Held at WARNING: a full put/get/delete cycle at application DEBUG now emits
+  zero SDK lines, down from hundreds.
+- `pip-audit`, Bandit, Semgrep, Gitleaks and Trivy are still not installed, so
+  no dependency, SAST, secret or container scan is claimed. Those gates are
+  M16 work.
+
+### Known limitations
+
+Face and identification images remain on the legacy digest-addressed object
+store; migrating live biometric objects belongs with M3, where the
+reference/observed biometric split is introduced. The derivative table has no
+producer until M6. Uploads are buffered to the ceiling rather than streamed,
+and container duration is not probed — both are M9 work. Remote URL ingestion
+is deliberately absent until M4 supplies the SSRF-safe downloader.
+
+See `docs/MEDIA_PIPELINE.md` for the ingestion contract, file-safety policy,
+bucket layout, retention semantics and AWS mapping. Master Phase M3 (trust
+boundaries, authorization and storage isolation) is recommended next; it is
+not started.

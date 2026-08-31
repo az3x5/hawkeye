@@ -32,6 +32,11 @@ class AuditAction(StrEnum):
     TOKEN_REVOKED = "token_revoked"  # noqa: S105 - an action name
     PROCESSING_JOB_RETRIED = "processing_job_retried"
     PROCESSING_JOB_CANCELLED = "processing_job_cancelled"
+    MEDIA_INGESTED = "media_ingested"
+    MEDIA_VIEWED = "media_viewed"
+    MEDIA_ERASED = "media_erased"
+    MEDIA_HOLD_PLACED = "media_hold_placed"
+    MEDIA_HOLD_RELEASED = "media_hold_released"
 
 
 @dataclass(frozen=True, slots=True)

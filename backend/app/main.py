@@ -16,11 +16,12 @@ from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
 from app.api.v1.language import router as language_router
 from app.api.v1.me import router as me_router
+from app.api.v1.media import router as media_router
 from app.api.v1.metrics import router as metrics_router
 from app.api.v1.persons import router as person_router
 from app.api.v1.processing_jobs import router as processing_job_router
 from app.api.v1.sessions import router as session_router
-from app.connectors.filesystem import FilesystemObjectStore
+from app.connectors.filesystem import FilesystemBlobStore, FilesystemObjectStore
 from app.connectors.postgres import PostgresConnector
 from app.connectors.qdrant import QdrantConnector
 from app.connectors.redis import (
@@ -29,11 +30,14 @@ from app.connectors.redis import (
     RedisLanguageJobQueue,
     RedisRateLimiter,
 )
+from app.connectors.s3 import S3BlobStore, S3Config
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.readiness import clear_probes, register_probe
+from app.domain.storage import BlobStore
 from app.services.language_embeddings import MultilingualE5Embedder
+from app.services.media import BUCKETS
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     objects = FilesystemObjectStore(settings.object_store_root)
     app.state.objects = objects
     register_probe(objects.provider, objects.ping)
+
+    # Media storage. Separate from the legacy face object store above: that one
+    # keeps its digest-addressed layout and its data, while media uses the
+    # bucket-addressed seam that also runs against MinIO and S3.
+    blobs = build_blob_store(settings)
+    app.state.blobs = blobs
+    register_probe(blobs.provider, blobs.ping)
+    for bucket in BUCKETS.values():
+        try:
+            await blobs.ensure_bucket(bucket)
+        except Exception:
+            # A missing bucket must not stop the service from starting: it
+            # makes media unavailable, which readiness already reports, while
+            # face identification and language search keep working.
+            logger.exception("could not ensure media bucket %s", bucket)
 
     # Identification answers in the request path, so its models live here.
     # Enrolment still hands its work to the worker; only identification pays
@@ -124,6 +143,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("hawkeye service stopping")
 
 
+def build_blob_store(settings: Settings) -> BlobStore:
+    """Construct the configured media blob store.
+
+    The two backends are interchangeable by contract, so this is the only
+    place in the application that knows which one is in use.
+    """
+    if settings.object_store_backend == "s3":
+        # Validated at settings load, so these are present here.
+        assert settings.s3_access_key is not None  # noqa: S101 - settings invariant
+        assert settings.s3_secret_key is not None  # noqa: S101 - settings invariant
+        return S3BlobStore(
+            S3Config(
+                endpoint_url=settings.s3_endpoint_url,
+                region=settings.s3_region,
+                access_key=settings.s3_access_key,
+                secret_key=settings.s3_secret_key,
+                use_path_style=settings.s3_use_path_style,
+            )
+        )
+    return FilesystemBlobStore(settings.object_store_root / "buckets")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the ASGI application.
 
@@ -148,6 +189,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(processing_job_router, prefix=settings.api_v1_prefix)
     app.include_router(identification_router, prefix=settings.api_v1_prefix)
     app.include_router(language_router, prefix=settings.api_v1_prefix)
+    app.include_router(media_router, prefix=settings.api_v1_prefix)
     app.include_router(person_router, prefix=settings.api_v1_prefix)
     app.include_router(me_router, prefix=settings.api_v1_prefix)
     app.include_router(session_router, prefix=settings.api_v1_prefix)

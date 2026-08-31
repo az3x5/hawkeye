@@ -8,3 +8,9 @@ __pycache__/
 
 # Model weights: fetched per environment, verified by checksum, never committed.
 models/
+
+# Operational data drops. CSV/people.csv holds real identity records including
+# national ID numbers; it is ignored so a routine `git add -A` cannot commit it.
+CSV/
+# SQLAlchemy leaves this behind when a session is pointed at an in-memory URL.
+backend/:memory:*

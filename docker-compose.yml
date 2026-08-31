@@ -13,6 +13,12 @@ services:
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
       FACEID_OBJECT_STORE_ROOT: /srv/objects
+      FACEID_OBJECT_STORE_BACKEND: ${OBJECT_STORE_BACKEND:-s3}
+      FACEID_S3_ENDPOINT_URL: http://minio:9000
+      FACEID_S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      FACEID_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      FACEID_S3_USE_PATH_STYLE: "true"
+      FACEID_MEDIA_MAX_UPLOAD_BYTES: ${MEDIA_MAX_UPLOAD_BYTES:-268435456}
       FACEID_DECISION_ACCEPT_THRESHOLD: ${FACEID_DECISION_ACCEPT_THRESHOLD}
       FACEID_DECISION_REVIEW_THRESHOLD: ${FACEID_DECISION_REVIEW_THRESHOLD}
       FACEID_DECISION_POLICY_VERSION: ${FACEID_DECISION_POLICY_VERSION}
@@ -46,6 +52,7 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       qdrant: {condition: service_started}
+      minio: {condition: service_healthy}
     networks: [faceid]
 
   frontend:
@@ -74,6 +81,12 @@ services:
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
       FACEID_OBJECT_STORE_ROOT: /srv/objects
+      FACEID_OBJECT_STORE_BACKEND: ${OBJECT_STORE_BACKEND:-s3}
+      FACEID_S3_ENDPOINT_URL: http://minio:9000
+      FACEID_S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      FACEID_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      FACEID_S3_USE_PATH_STYLE: "true"
+      FACEID_MEDIA_MAX_UPLOAD_BYTES: ${MEDIA_MAX_UPLOAD_BYTES:-268435456}
       FACEID_DECISION_ACCEPT_THRESHOLD: ${FACEID_DECISION_ACCEPT_THRESHOLD}
       FACEID_DECISION_REVIEW_THRESHOLD: ${FACEID_DECISION_REVIEW_THRESHOLD}
       FACEID_DECISION_POLICY_VERSION: ${FACEID_DECISION_POLICY_VERSION}
@@ -93,6 +106,7 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       qdrant: {condition: service_started}
+      minio: {condition: service_healthy}
     volumes:
       - "./models:/srv/models:ro"
       - "object-data:/srv/objects"
@@ -117,6 +131,26 @@ services:
       qdrant: {condition: service_started}
     volumes:
       - "language-model-cache-v2:/srv/model-cache"
+    networks: [faceid]
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Buckets hold media and biometric crops. Nothing here is public, and
+      # anonymous access is refused rather than left to bucket policy alone.
+      MINIO_BROWSER: ${MINIO_BROWSER:-off}
+    # Loopback only, for local integration tests and operator inspection.
+    # The API reaches MinIO over the internal network, not through this.
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes: [minio-data:/data]
     networks: [faceid]
 
   postgres:
@@ -158,6 +192,7 @@ networks:
 
 volumes:
   object-data:
+  minio-data:
   postgres-data:
   redis-data:
   qdrant-data:

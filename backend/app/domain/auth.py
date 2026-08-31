@@ -46,6 +46,10 @@ class Scope(StrEnum):
     IDENTIFY = "identify"
     REVIEW = "review"
     LANGUAGE = "language"
+    #: Submit media for storage and processing.
+    MEDIA_WRITE = "media:write"
+    #: Read media metadata and fetch stored bytes.
+    MEDIA_READ = "media:read"
     ADMIN = "admin"
 
 

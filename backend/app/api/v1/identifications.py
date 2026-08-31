@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -102,6 +102,33 @@ class IdentificationResponse(BaseModel):
     review_note: str | None = None
 
 
+class LiveFaceBoxResponse(BaseModel):
+    """A detected face box in original-frame pixel coordinates."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class LiveFaceResponse(BaseModel):
+    """One face detected and independently identified in a live frame."""
+
+    detection_index: int
+    box: LiveFaceBoxResponse
+    detection_score: float = Field(ge=0.0, le=1.0)
+    identification: IdentificationResponse
+
+
+class LiveFrameAnalysisResponse(BaseModel):
+    """All face observations produced from one live-source frame."""
+
+    frame_width: int = Field(gt=0)
+    frame_height: int = Field(gt=0)
+    analyzed_at: datetime
+    faces: list[LiveFaceResponse]
+
+
 class ReviewRequest(BaseModel):
     """A human's conclusion about an identification.
 
@@ -179,6 +206,67 @@ async def create_identification(
     except IdentificationError as exc:
         raise IdentificationFailedError(str(exc)) from exc
     return _decision_response(result.identification_uuid, result.decision)
+
+
+@router.post(
+    "/live/frames/analyze",
+    response_model=LiveFrameAnalysisResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Analyze every face in a live frame",
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def analyze_live_frame(
+    image: Annotated[UploadFile, File()],
+    service: Annotated[IdentificationService, Depends(get_identification_service)],
+    principal: Annotated[
+        Principal,
+        Depends(rate_limited(Scope.IDENTIFY, "live-identify", lambda s: s.rate_limit_identify)),
+    ],
+) -> LiveFrameAnalysisResponse:
+    """Locate and independently identify every face in a submitted frame.
+
+    An empty frame is a successful observation with no faces. Each returned
+    identity is still a proposal, never proof, and preserves the policy and raw
+    similarity evidence used to produce it.
+    """
+    data = await read_image_upload(image)
+    try:
+        embedded = await service.embed_live_frame(data)
+        faces: list[LiveFaceResponse] = []
+        for index, face in enumerate(embedded.faces):
+            result = await service.identify(
+                face.embedding,
+                query_bytes=data,
+                actor=principal.as_actor(),
+            )
+            faces.append(
+                LiveFaceResponse(
+                    detection_index=index,
+                    box=LiveFaceBoxResponse(
+                        x1=face.box.x1,
+                        y1=face.box.y1,
+                        x2=face.box.x2,
+                        y2=face.box.y2,
+                    ),
+                    detection_score=face.detection_score,
+                    identification=_decision_response(result.identification_uuid, result.decision),
+                )
+            )
+    except IdentificationError as exc:
+        raise IdentificationFailedError(str(exc)) from exc
+
+    return LiveFrameAnalysisResponse(
+        frame_width=embedded.width,
+        frame_height=embedded.height,
+        analyzed_at=datetime.now(UTC),
+        faces=faces,
+    )
 
 
 class IdentificationSummary(BaseModel):

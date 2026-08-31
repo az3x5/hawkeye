@@ -172,14 +172,16 @@ proposal because of it.
 
 ## 4. Storage
 
-Implemented so far: the PostgreSQL metadata store and the Qdrant vector store.
+Implemented so far: the PostgreSQL metadata store, the Qdrant vector store,
+and the media blob store.
 
 | Store | Holds | Notes |
 | --- | --- | --- |
-| PostgreSQL | identity metadata, embedding provenance, audit, language metadata, durable processing jobs and attempts | system of record |
+| PostgreSQL | identity metadata, embedding provenance, audit, language metadata, durable processing jobs and attempts, media assets and provenance | system of record |
 | Qdrant | embedding vectors, one collection per provenance triple | internal network only |
 | Redis | rate limiting and legacy queue cutover only | never job truth |
-| Object store | source images / face crops | via a connector |
+| Object store (legacy) | face sample and query images, addressed by digest | `FilesystemObjectStore` |
+| Blob store | media asset bytes, addressed by bucket and key | `FilesystemBlobStore` or `S3BlobStore` (MinIO/S3) |
 
 Every stored embedding records `model_name`, `model_version` and
 `preprocessing_version`. Vectors from different triples are never compared;
@@ -190,6 +192,24 @@ compose topology gives it no published port. Integration tests reach it
 through `docker-compose.dev.yml`, an overlay that publishes it on loopback for
 local development only — deliberately a separate file, so the base topology
 stays the shape we want deployed.
+
+### Media and blob storage
+
+Media bytes live behind `BlobStore` (`app/domain/storage.py`), addressed by
+`(bucket, key)` rather than by digest alone. Two implementations satisfy one
+contract suite: a filesystem tree for development and an S3 client that serves
+MinIO locally and S3 in AWS. Because the contract is proven against both, the
+cloud migration is a configuration change rather than a rewrite.
+
+Metadata stays in PostgreSQL. `media.assets` holds one row per distinct byte
+sequence; `media.asset_sources` holds one row per *arrival*, so deduplicating
+bytes never deduplicates provenance. Media is identified from its magic bytes,
+not from a caller's `Content-Type`, and image headers are checked against a
+pixel ceiling before any decoder is asked to allocate.
+
+The face pipeline deliberately keeps its existing digest-addressed object
+store and its data; moving live biometric objects is a data migration that
+belongs with the reference/observed split in M3. See `MEDIA_PIPELINE.md`.
 
 ### Vector storage
 

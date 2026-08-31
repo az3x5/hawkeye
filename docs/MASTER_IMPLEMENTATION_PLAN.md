@@ -1,8 +1,8 @@
 # EagleEye master implementation plan
 
-Plan date: 2026-08-29
+Plan date: 2026-08-31
 Evidence baseline: `docs/REPOSITORY_AUDIT.md`
-Completed phase: **M1 — Durable processing core**
+Completed phases: **M0**, **M1 — Durable processing core**, **M2 — First-class media and local object storage**
 
 ## Product boundary and non-negotiable principles
 
@@ -214,50 +214,114 @@ then revert worker/producer wiring. Redis legacy envelopes can be recovered
 during the compatibility window. Downgrade `79b8c31f4d2a` only after exporting
 or deliberately discarding processing history; downgrade deletes that schema.
 
-## M2 — First-class media and local object storage
+## M2 — First-class media and local object storage — COMPLETE
 
-**Goal**
-Represent source and derived media with immutable lineage and run the local stack against MinIO through an S3-compatible interface.
+**OBJECTIVE**
+Represent source media with immutable identity, provenance and lineage, and
+run the local stack against MinIO through an S3-compatible interface that AWS
+can inherit without domain changes.
 
-**Dependencies**
-M1.
+**CURRENT STATE**
+`media.assets` holds one row per distinct byte sequence. Every arrival of an
+asset is a separate `media.asset_sources` row, so deduplicating bytes does not
+deduplicate provenance. `media.asset_derivatives` records lineage for later
+modality phases, and `media.retention_holds` vetoes erasure. Media is
+identified from its magic bytes rather than from the caller's declared type,
+uploads are bounded while being read, and image headers are checked against a
+pixel ceiling before any decoder allocates. `BlobStore` addresses objects by
+bucket and key; the filesystem and S3 implementations pass one shared contract
+suite, and Compose runs the S3 backend against MinIO.
 
-**Scope**
+**FILES CHANGED**
+`app/core/config.py` (storage backend, S3 and media settings plus a startup
+validator), `app/main.py` (blob store construction, readiness probe, bucket
+creation, router), `app/api/v1/dependencies.py` (media service wiring),
+`app/api/v1/enrolments.py` (bounded reads and magic-byte identification),
+`app/domain/audit.py` (media actions), `app/domain/auth.py` (`media:read`,
+`media:write`), `app/core/logging.py` (AWS SDK loggers held at WARNING),
+`app/connectors/filesystem/__init__.py`, `pyproject.toml` (boto3, mypy
+overrides), `docker-compose.yml` and `docker-compose.deploy.yml` (MinIO,
+unpublished in deployments), `.github/workflows/ci.yml` (MinIO service, so CI
+tests both storage backends), `.gitignore` (untracked identity data),
+`.env.example`,
+`frontend/src/lib/types.ts` and `frontend/src/app/settings/scope-picker.tsx`
+(the new scopes are grantable).
 
-- Add media asset, derivative, location, classification, retention, and provenance contracts.
-- Implement filesystem and S3-compatible adapters; add MinIO to local Compose.
-- Migrate new writes to media IDs while retaining read compatibility for existing SHA paths.
-- Add bounded multipart upload, content sniffing, hashing, deduplication, lifecycle, and signed/streamed reads.
+**FILES CREATED**
+`app/domain/storage.py`, `app/domain/content_types.py`, `app/domain/media.py`,
+`app/connectors/filesystem/blob_store.py`, `app/connectors/s3/blob_store.py`,
+`app/connectors/postgres/media_tables.py`, `app/connectors/postgres/media.py`,
+`app/services/media.py`, `app/api/v1/media.py`, migration
+`c3f7a91d8b40_media_assets.py`, tests `test_content_types.py`,
+`test_blob_store.py`, `test_media_service.py`, `test_media_api.py`,
+`test_media_repository.py`, and `docs/MEDIA_PIPELINE.md`.
 
-**Out of scope**
-OCR/vision/audio analysis, remote URL ingestion, or bulk migration without dry-run/reconciliation.
+**DATABASE CHANGES**
+Revision `c3f7a91d8b40` creates the `media` schema with `assets`,
+`asset_sources`, `asset_derivatives` and `retention_holds`. Constraints carry
+the invariants: `sha256` is unique and format-checked, `status = 'erased'` and
+`erased_at IS NOT NULL` must agree, a derivative cannot be its own source, and
+provenance is unique per `(media, source type, system, external id)`. Downgrade
+drops the schema.
 
-**Services/components affected**
-API, workers, object-store connectors, Postgres, MinIO, frontend media components.
+**API CHANGES**
+Adds `POST /api/v1/media`, `GET /api/v1/media`,
+`GET /api/v1/media/{media_uuid}`, `GET /api/v1/media/{media_uuid}/sources`,
+`GET /api/v1/media/{media_uuid}/content` (single-range capable),
+`DELETE /api/v1/media/{media_uuid}`, and the retention-hold endpoints. Existing
+enrolment, identification, language and processing contracts are unchanged;
+enrolment still answers 422 for oversized and unrecognised images.
 
-**Database changes**
-Create `media.assets`, `media.asset_derivatives`, `media.asset_locations`, and `media.retention_holds`; map legacy face/query hashes.
+**AI/MODEL CHANGES**
+None. No model, threshold or adapter was touched.
 
-**API changes**
-Add media upload/status/content/delete endpoints with scope and range support; preserve existing face-image endpoints as compatibility facades.
+**BLACKGLASS INTEGRATION CHANGES**
+None implemented. `SourceType.BLACKGLASS` and the external-source-id
+deduplication key exist so M4 can attach without a schema change. No client,
+credential seam or endpoint was added, and remote URL ingestion is deliberately
+absent until M4 supplies the SSRF-safe downloader.
 
-**Model/AI changes**
-None.
+**SECURITY CONSIDERATIONS**
+Closes three defects the audit identified: uploads were accepted on the
+caller's declared content type, the size ceiling was applied only after the
+whole body was buffered, and the API depended on a concrete filesystem store.
+Adds decompression-bomb resistance, path-traversal refusal at the address type
+and again at the filesystem backend, separate `media:read`/`media:write`
+scopes where neither implies the other, admin-only erasure and holds, audited
+reads of restricted and biometric assets, and `no-store`/`nosniff`/attachment
+headers on content responses. Bytes are never served by content hash. MinIO is
+loopback-only with its console disabled, and an S3 backend without credentials
+fails at startup rather than on first upload.
 
-**Security/privacy implications**
-Private buckets, encryption-ready interface, short-lived access, no public URLs, MIME/magic/size checks, quarantine state, classification-aware authorization, and audited sensitive reads.
+**TESTS**
+Backend regression with real PostgreSQL, Redis, Qdrant, MinIO, SCRFD and
+AdaFace: **732 passed, 0 skipped**. The blob-store contract suite runs against
+both backends. Migration rehearsal: upgrade to head, downgrade one, upgrade,
+downgrade to base. Ruff, Ruff format and strict mypy clean. Frontend
+typecheck, ESLint and 74 Vitest tests pass. Compose configuration validates.
 
-**Tests required**
-Filesystem/MinIO contract suite, malformed/polyglot/oversized upload tests, dedupe, range reads, retention/legal hold, orphan reconciliation, migration dry run, and backup/restore.
+**ACCEPTANCE CRITERIA**
+Verified: identical bytes converge on one asset while every arrival is
+retained; erasure removes bytes and keeps the metadata that makes a past
+decision explicable; a retention hold blocks erasure and releasing it permits
+erasure again; the filesystem and MinIO backends pass the same contract.
+Partially met: derived artifacts have a lineage table and constraints but no
+producer yet, because nothing derives media until M6.
 
-**Acceptance criteria**
-Identical bytes converge; derived artifacts link to immutable sources and transforms; deleting eligible media removes metadata/object/vector derivatives without violating holds; filesystem and MinIO pass the same contract.
+**DEPENDENCIES**
+M1. PostgreSQL, and either a writable directory or an S3-compatible endpoint.
 
-**Documentation required**
-Media lifecycle, bucket/key policy, retention model, migration/reconciliation runbook, S3 mapping.
+**BLOCKERS**
+None. Face and identification images remain on the legacy digest-addressed
+store by choice; migrating live biometric objects is deferred to M3, where the
+reference/observed split is introduced.
 
-**Rollback plan**
-Keep legacy filesystem reads during dual-write; switch adapter setting back and reconcile objects by digest.
+**ROLLBACK CONSIDERATIONS**
+Set `FACEID_OBJECT_STORE_BACKEND=filesystem` to leave MinIO without touching
+application code. The media router can be removed without affecting face,
+language or processing paths. Downgrade `c3f7a91d8b40` only after exporting
+media metadata: the object bytes survive in the bucket, but the rows saying
+what they are and where they came from do not.
 
 ## M3 — Trust boundaries, authorization, and storage isolation
 

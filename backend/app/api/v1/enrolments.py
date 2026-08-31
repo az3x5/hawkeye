@@ -14,10 +14,18 @@ from app.api.v1.dependencies import (
     get_object_store,
     get_sample_reader,
 )
+from app.api.v1.media import read_bounded_upload
 from app.api.v1.security import require
 from app.connectors.filesystem import FilesystemObjectStore
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
+from app.domain.content_types import (
+    IMAGE_FORMATS,
+    MediaTooLargeError,
+    UnsupportedMediaError,
+    sniff,
+    verify_declared,
+)
 from app.domain.jobs import ProcessingState
 from app.domain.models import DomainValidationError
 from app.services.enrolment import (
@@ -29,10 +37,12 @@ from app.services.enrolment import (
 
 router = APIRouter(tags=["enrolment"])
 
-#: Upload ceiling. Larger images are rejected before anything is read into
-#: memory-resident storage.
+#: Upload ceiling. Enforced while reading, so an oversized body is refused
+#: rather than buffered and then measured.
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
+#: Kept for compatibility with callers that read it. The accept decision is
+#: made from the file's magic bytes, not from this list.
 ALLOWED_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 
@@ -104,21 +114,23 @@ def _to_response(person_uuid: UUID, sample: object, created: bool) -> EnrolmentR
 
 
 async def read_image_upload(upload: UploadFile) -> bytes:
-    """Validate an uploaded image and return its bytes."""
-    if upload.content_type not in ALLOWED_CONTENT_TYPES:
-        raise InvalidEnrolmentError(
-            f"unsupported image type {upload.content_type!r}; "
-            f"expected one of {', '.join(sorted(ALLOWED_CONTENT_TYPES))}",
-            field="image",
-        )
-    data = await upload.read()
-    if not data:
-        raise InvalidEnrolmentError("the uploaded image is empty", field="image")
-    if len(data) > MAX_IMAGE_BYTES:
-        raise InvalidEnrolmentError(
-            f"image is {len(data)} bytes, which exceeds the {MAX_IMAGE_BYTES} byte limit",
-            field="image",
-        )
+    """Validate an uploaded image and return its bytes.
+
+    The image is identified from its contents. A caller's ``Content-Type`` is
+    a claim, and accepting a file because the claim was in an allowlist means
+    the allowlist describes the claim rather than the file — so the declared
+    type is only checked for *disagreement* with what the bytes really are.
+
+    The size ceiling is applied while reading. Reading the whole body first
+    and measuring it afterwards lets a caller decide how much memory the API
+    allocates, which is the attack the limit looks like it prevents.
+    """
+    try:
+        data = await read_bounded_upload(upload, MAX_IMAGE_BYTES)
+        detected = sniff(data, allowed=IMAGE_FORMATS)
+        verify_declared(upload.content_type, detected.format)
+    except (MediaTooLargeError, UnsupportedMediaError) as exc:
+        raise InvalidEnrolmentError(str(exc), field="image") from exc
     return data
 
 

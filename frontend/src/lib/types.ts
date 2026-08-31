@@ -33,6 +33,27 @@ export interface Identification {
   review_note: string | null;
 }
 
+export interface LiveFaceBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface LiveFaceAnalysis {
+  detection_index: number;
+  box: LiveFaceBox;
+  detection_score: number;
+  identification: Identification;
+}
+
+export interface LiveFrameAnalysis {
+  frame_width: number;
+  frame_height: number;
+  analyzed_at: string;
+  faces: LiveFaceAnalysis[];
+}
+
 export interface IdentificationSummary {
   identification_uuid: string;
   outcome: DecisionOutcome;
@@ -227,7 +248,15 @@ export interface IssuedToken extends TokenRecord {
 }
 
 /** The scopes the API recognises. */
-export const SCOPES = ["enrol", "identify", "review", "language", "admin"] as const;
+export const SCOPES = [
+  "enrol",
+  "identify",
+  "review",
+  "language",
+  "media:write",
+  "media:read",
+  "admin",
+] as const;
 export type Scope = (typeof SCOPES)[number];
 
 export type LanguageScript = "thaana" | "latin" | "number" | "other";

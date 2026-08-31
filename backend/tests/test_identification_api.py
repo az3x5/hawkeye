@@ -17,6 +17,7 @@ from app.api.v1.identifications import router as identification_router
 from app.core.errors import ErrorResponse, install_error_handlers
 from app.domain.audit import AuditEvent
 from app.domain.auth import Scope
+from app.domain.detection import BoundingBox
 from app.domain.identity import (
     Candidate,
     DecisionOutcome,
@@ -26,7 +27,12 @@ from app.domain.identity import (
     StoredIdentification,
 )
 from app.domain.recognition import EmbeddingProvenance, FaceEmbedding
-from app.services.identification import IdentificationError, IdentificationResult
+from app.services.identification import (
+    IdentificationError,
+    IdentificationResult,
+    LiveFaceEmbedding,
+    LiveFrameEmbeddings,
+)
 
 from .conftest import authenticate
 
@@ -81,6 +87,7 @@ class FakeService:
             outcome=DecisionOutcome.ACCEPT, thresholds=POLICY, candidates=_candidates(0.9)
         )
         self.embed_error: str | None = None
+        self.live_face_count = 0
         self.audit: list[AuditEvent] = []
 
     async def embed_query(self, image_bytes: bytes) -> FaceEmbedding:
@@ -99,6 +106,26 @@ class FakeService:
         identification_uuid = uuid4()
         await self.store.add(identification_uuid, "0" * 64, self.decision)
         return IdentificationResult(identification_uuid, self.decision)
+
+    async def embed_live_frame(self, image_bytes: bytes) -> LiveFrameEmbeddings:
+        embedding = await self.embed_query(image_bytes)
+        return LiveFrameEmbeddings(
+            width=960,
+            height=540,
+            faces=tuple(
+                LiveFaceEmbedding(
+                    box=BoundingBox(
+                        x1=10.0 + index * 100,
+                        y1=20.0,
+                        x2=90.0 + index * 100,
+                        y2=140.0,
+                    ),
+                    detection_score=0.95 - index * 0.05,
+                    embedding=embedding,
+                )
+                for index in range(self.live_face_count)
+            ),
+        )
 
     async def review(
         self,
@@ -231,6 +258,47 @@ class TestIdentify:
     def test_a_missing_image_fails_validation(self, client: TestClient) -> None:
         response = client.post("/api/v1/identifications", data={})
         assert response.status_code == 422
+
+
+class TestLiveFrameAnalysis:
+    def test_empty_frame_is_a_successful_observation(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        service.live_face_count = 0
+
+        response = client.post("/api/v1/live/frames/analyze", files={"image": JPEG})
+
+        assert response.status_code == 201
+        assert response.json()["frame_width"] == 960
+        assert response.json()["frame_height"] == 540
+        assert response.json()["faces"] == []
+
+    def test_returns_each_face_with_geometry_and_identity(
+        self, client: TestClient, service: FakeService, store: FakeStore
+    ) -> None:
+        service.live_face_count = 2
+
+        response = client.post("/api/v1/live/frames/analyze", files={"image": JPEG})
+
+        assert response.status_code == 201
+        faces = response.json()["faces"]
+        assert len(faces) == 2
+        assert faces[0]["detection_index"] == 0
+        assert faces[0]["box"] == {"x1": 10.0, "y1": 20.0, "x2": 90.0, "y2": 140.0}
+        assert faces[0]["detection_score"] == pytest.approx(0.95)
+        assert faces[0]["identification"]["outcome"] == "accept"
+        assert faces[1]["box"]["x1"] == pytest.approx(110.0)
+        assert len(store.records) == 2
+
+    def test_invalid_frame_uses_the_structured_error(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        service.embed_error = "the live frame could not be decoded"
+
+        response = client.post("/api/v1/live/frames/analyze", files={"image": JPEG})
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "identification_failed"
 
 
 class TestReadIdentification:

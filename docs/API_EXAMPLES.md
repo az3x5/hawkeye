@@ -143,6 +143,64 @@ curl -sS http://127.0.0.1:8000/api/v1/tokens -H "Authorization: Bearer $TOKEN"
 curl -sS -X DELETE http://127.0.0.1:8000/api/v1/tokens/$TOKEN_UUID -H "Authorization: Bearer $TOKEN"
 ```
 
+## 8. Media — scopes `media:write`, `media:read`, `admin`
+
+Submit media. The type is decided by the file's magic bytes, so a declared
+`Content-Type` that contradicts the contents is refused rather than corrected.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/media \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'source_type=upload' \
+  -F 'source_system=console' \
+  -F 'classification=internal' \
+  -F 'file=@/path/to/photo.png'
+```
+
+Resubmitting identical bytes returns the same `media_uuid` with
+`"status": "already_held"` and records the new arrival as an extra source.
+Naming the upstream record makes redelivery idempotent:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/media \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'source_type=blackglass' \
+  -F 'source_system=blackglass-prod' \
+  -F 'external_source_id=bg-4471' \
+  -F 'file=@/path/to/photo.png'
+```
+
+Read the metadata, every recorded arrival, and a page of assets:
+
+```bash
+curl -sS http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID -H "Authorization: Bearer $TOKEN"
+curl -sS http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID/sources -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/media?media_type=image&limit=20" -H "Authorization: Bearer $TOKEN"
+```
+
+Fetch the bytes. Ranges are supported, capped at 8 MiB per response:
+
+```bash
+curl -sS http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID/content -H "Authorization: Bearer $TOKEN" -o photo.png
+curl -sS http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID/content -H "Authorization: Bearer $TOKEN" -H 'Range: bytes=0-1023' -o head.bin
+```
+
+Retention holds block erasure until released. Both require `admin`:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID/holds?reason=litigation" -H "Authorization: Bearer $TOKEN"
+curl -sS "http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID/holds" -H "Authorization: Bearer $TOKEN"
+curl -sS -X DELETE "http://127.0.0.1:8000/api/v1/media/holds/$HOLD_UUID" -H "Authorization: Bearer $TOKEN"
+```
+
+Erasure removes the bytes and keeps the metadata, so a decision that cited this
+media stays explicable. It answers 409 while a hold is active:
+
+```bash
+curl -sS -X DELETE "http://127.0.0.1:8000/api/v1/media/$MEDIA_UUID?reason=subject%20request" \
+  -H "Authorization: Bearer $TOKEN" -o /dev/null -w '%{http_code}\n'
+```
+
 ## Errors
 
 Every failure uses one envelope, so `error.code` is the thing to branch on:

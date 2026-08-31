@@ -6,6 +6,8 @@ const MEANING: Record<string, string> = {
   identify: "submit identifications",
   review: "read the queue and record review decisions",
   language: "normalize, analyze and transliterate Dhivehi text",
+  "media:write": "submit media for storage and processing",
+  "media:read": "read media metadata and fetch stored bytes",
   admin: "erase people, manage accounts and credentials",
 };
 

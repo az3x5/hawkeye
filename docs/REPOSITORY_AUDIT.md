@@ -229,3 +229,61 @@ Security testing is authorized only against localhost and local Docker by defaul
 8. Finish with explicit security hardening, performance/DR verification, and AWS deployment readiness.
 
 The phase order is a dependency order, not a promise to install every heavyweight model. Every candidate model must pass a local benchmark and resource review before replacing a working baseline.
+
+---
+
+## Addendum — re-verification at `7c9675d` (2026-08-31)
+
+The audit above was taken at `68d10f9`. Four commits later the repository is at
+`7c9675d`, and two of the audit's limits no longer apply.
+
+### Limits that lifted
+
+- **Runtime state is now evidence.** The Compose stack for *this* checkout is
+  running (`eagleeye-*` containers), so integration tests were executed against
+  real PostgreSQL, Redis and Qdrant rather than skipped.
+- **The virtual environment works.** Its `pip` console script still carries the
+  stale `/home/axmyn/Projects/AI` shebang and must be invoked as
+  `python -m pip`, but the interpreter and dependencies are usable.
+
+### Verified baseline before M2
+
+| Check | Result |
+| --- | --- |
+| Backend pytest with all services and both model weights | 594 passed, 0 skipped |
+| Ruff check and format | clean, 129 files |
+| mypy `--strict` | clean, 118 source files |
+| Frontend typecheck, ESLint, Vitest | clean, 74 tests |
+| Fresh database `alembic upgrade head` | 10 revisions to `79b8c31f4d2a` |
+| `docker compose config` | valid |
+
+### Classifications that changed
+
+| Capability | Was | Now | Reason |
+| --- | --- | --- | --- |
+| Durable processing jobs | PARTIAL | COMPLETE | `processing` schema with `jobs`, `job_attempts`, `worker_heartbeats` and `outbox_events` confirmed in a live database; M1 delivered |
+| Media/object storage | PARTIAL | COMPLETE | M2 delivered the `media` schema, the bucket-addressed seam and the MinIO backend |
+| Local production-like Compose | PARTIAL | PARTIAL | MinIO added; isolated Qdrant domains and specialist workers still absent |
+
+Every other classification in the table above stands.
+
+### Defects confirmed by reading the source, and closed by M2
+
+1. `app/api/v1/enrolments.py` accepted an upload when its **declared**
+   `content_type` was in an allowlist, so the allowlist described the caller's
+   claim rather than the file. A PDF named `photo.jpg` was accepted.
+2. The same function read the entire body with `await upload.read()` **before**
+   applying the 10 MiB ceiling, letting a caller decide how much memory the API
+   allocated — the denial of service the limit appeared to prevent.
+3. `app/api/v1/dependencies.py` type-annotated and `isinstance`-checked the
+   concrete `FilesystemObjectStore`, so nothing could be swapped for S3 or
+   MinIO even though `ObjectStore` existed as a Protocol in `app/domain/jobs.py`.
+
+### Untracked material — unchanged and still unresolved
+
+`CSV/people.csv` is 21 MB of real identity records including national ID
+numbers. It is untracked and must stay that way; `.gitignore` does not name it,
+so it is one careless `git add -A` from being committed. `backend/:memory:.ses`,
+`docker-compose.import.yml`, `scripts/import_dheni.py` and
+`scripts/purge_people.py` are also untracked and their ownership is unresolved.
+M2 did not touch any of them.

@@ -44,6 +44,38 @@ class Settings(BaseSettings):
         description="Directory the filesystem object store writes beneath.",
     )
 
+    # Media object storage. The filesystem backend is the local default and
+    # needs no credentials; the s3 backend serves both MinIO locally and S3 in
+    # AWS, which is the whole point of the seam. Switching backends does not
+    # move existing objects — that is a deliberate migration, not a restart.
+    object_store_backend: Literal["filesystem", "s3"] = Field(
+        default="filesystem",
+        description="Which BlobStore implementation serves media.",
+    )
+    s3_endpoint_url: str | None = Field(
+        default=None,
+        description="S3 endpoint. Set for MinIO; leave unset for real AWS S3.",
+    )
+    s3_region: str = Field(default="us-east-1", min_length=1)
+    s3_access_key: str | None = Field(default=None, description="S3 access key id.")
+    s3_secret_key: str | None = Field(default=None, description="S3 secret access key.")
+    s3_use_path_style: bool = Field(
+        default=True,
+        description="Path-style addressing. True for MinIO, false for AWS S3.",
+    )
+
+    # Upload ceiling for media ingestion. Enforced while reading the request
+    # body, so an oversized upload is refused without first being buffered.
+    media_max_upload_bytes: int = Field(
+        default=256 * 1024 * 1024,
+        ge=1024,
+        le=8 * 1024 * 1024 * 1024,
+        description="Largest single media upload accepted, in bytes.",
+    )
+    media_page_size_limit: int = Field(
+        default=200, ge=1, le=1000, description="Server ceiling on media listing page size."
+    )
+
     # Durable processing policy. PostgreSQL owns state and leases; workers poll
     # briefly so a lost transport notification can never strand work.
     job_lease_seconds: int = Field(
@@ -174,6 +206,20 @@ class Settings(BaseSettings):
     language_embedding_device: str = Field(default="cpu", min_length=1)
     language_embedding_batch_size: int = Field(default=16, ge=1, le=256)
     language_embedding_max_tokens: int = Field(default=512, ge=32, le=8192)
+
+    @model_validator(mode="after")
+    def validate_object_store_backend(self) -> Settings:
+        """Refuse to start with an S3 backend that has no credentials.
+
+        Failing here is far kinder than failing on the first upload, when the
+        media is already in flight and the caller has no way to tell a
+        configuration mistake from an outage.
+        """
+        if self.object_store_backend == "s3" and not (self.s3_access_key and self.s3_secret_key):
+            raise ValueError(
+                "object_store_backend='s3' requires FACEID_S3_ACCESS_KEY and FACEID_S3_SECRET_KEY"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_job_retry_window(self) -> Settings:

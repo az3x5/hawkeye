@@ -20,6 +20,7 @@ from app.connectors.postgres import (
     SqlAlchemyProcessingJobRepository,
 )
 from app.connectors.postgres.audit import SqlAlchemyAuditLog, SqlAlchemyIdentificationStore
+from app.connectors.postgres.media import SqlAlchemyMediaRepository
 from app.connectors.postgres.queries import ReadQueries
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
 from app.connectors.postgres.users import SqlAlchemyUserStore
@@ -34,6 +35,7 @@ from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
 from app.services.language_search import LanguageDocumentService, LanguageSearchService
+from app.services.media import MediaService
 from app.services.processing import (
     FaceJobSubmitter,
     LanguageJobSubmitter,
@@ -104,6 +106,23 @@ async def get_identification_service(
             objects=getattr(request.app.state, "objects", None),
             detector=getattr(request.app.state, "detector", None),
             recognizer=getattr(request.app.state, "recognizer", None),
+        )
+
+
+async def get_media_service(request: Request) -> AsyncIterator[MediaService]:
+    """Build a media service bound to one database transaction."""
+    blobs = getattr(request.app.state, "blobs", None)
+    if blobs is None:
+        raise ServiceUnavailableError("media storage is not available")
+
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        yield MediaService(
+            repository=SqlAlchemyMediaRepository(session),
+            blobs=blobs,
+            audit=SqlAlchemyAuditLog(session),
+            max_bytes=settings.media_max_upload_bytes,
+            page_size_limit=settings.media_page_size_limit,
         )
 
 

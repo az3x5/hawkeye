@@ -1,7 +1,7 @@
 "use server";
 
-import { ApiError, NotAuthenticatedError, submitIdentification } from "@/lib/api";
-import type { Identification } from "@/lib/types";
+import { ApiError, NotAuthenticatedError, submitIdentification, submitLiveFrame } from "@/lib/api";
+import type { Identification, LiveFrameAnalysis } from "@/lib/types";
 
 /**
  * The outcome of an identification attempt, as the browser sees it.
@@ -44,5 +44,37 @@ export async function identifyAction(formData: FormData): Promise<IdentifyResult
       code: "unreachable",
       message: "The Hawkeye API could not be reached.",
     };
+  }
+}
+
+export type LiveFrameResult =
+  | { ok: true; analysis: LiveFrameAnalysis }
+  | { ok: false; code: string; message: string; signedOut?: boolean };
+
+export async function analyzeLiveFrameAction(formData: FormData): Promise<LiveFrameResult> {
+  const image = formData.get("image");
+  if (!(image instanceof File) || image.size === 0) {
+    return { ok: false, code: "no_image", message: "The live frame was empty." };
+  }
+  try {
+    return { ok: true, analysis: await submitLiveFrame(image) };
+  } catch (error) {
+    if (error instanceof NotAuthenticatedError) {
+      return {
+        ok: false,
+        code: "not_authenticated",
+        message: "Your session has ended. Sign in again to continue.",
+        signedOut: true,
+      };
+    }
+    if (error instanceof ApiError) {
+      return {
+        ok: false,
+        code: error.code,
+        message: error.message,
+        signedOut: error.status === 401,
+      };
+    }
+    return { ok: false, code: "unreachable", message: "The EagleEye API could not be reached." };
   }
 }

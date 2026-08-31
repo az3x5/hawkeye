@@ -9,13 +9,16 @@ proposal records the policy that produced it, and every decision is auditable.
 It also includes an initial Dhivehi language workspace for Thaana, Romanized,
 English, and mixed-script normalization, transliteration, embedding, and search.
 
-**Status:** historical implementation Phases 0–14 and master Phase M1
-(durable processing) are complete; the Dhivehi language slice is partial. The
+**Status:** historical implementation Phases 0–14 and master Phases M1
+(durable processing) and M2 (first-class media and object storage) are
+complete; the Dhivehi language slice is partial. The
 production expansion is governed by the
 [repository audit](docs/REPOSITORY_AUDIT.md) and
 [master implementation plan](docs/MASTER_IMPLEMENTATION_PLAN.md). See
 [implementation status](docs/IMPLEMENTATION_STATUS.md) for verified deliveries
 and [architecture](docs/ARCHITECTURE.md) for the existing face-identity design.
+[Progress](docs/PROGRESS.md) and [what is missing](docs/WHATS_MISSING.md) track
+the build against the full platform specification.
 
 Legacy `Hawkeye`, `FACEID_`, image, and deployment names remain where changing
 them would break compatibility. New product-facing work uses EagleEye.
@@ -30,6 +33,7 @@ them would break compatibility. New product-facing work uses EagleEye.
 | Metadata | PostgreSQL |
 | Embeddings | Qdrant (one collection per model provenance) |
 | Jobs | PostgreSQL durable jobs; Redis for rate limits and legacy cutover |
+| Media | PostgreSQL asset metadata; MinIO/S3 object bytes behind one seam |
 | Frontend | Next.js 16 + React 19 + TypeScript (strict) |
 | Language embeddings | multilingual E5 (current baseline) |
 

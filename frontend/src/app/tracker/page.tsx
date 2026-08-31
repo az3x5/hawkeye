@@ -12,8 +12,8 @@ export default async function TrackerPage() {
   return (
     <>
       <PageHeader
-        title="Camera tracker"
-        description="Watch a camera for motion and identify a single visible face against enrolled people."
+        title="Live sources"
+        description="Analyze a device camera or shared CCTV screen for motion and known people."
       />
       {identity.scopes.includes("identify") ? (
         <CameraTracker />

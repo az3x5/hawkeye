@@ -45,6 +45,13 @@ class JsonFormatter(logging.Formatter):
 #: Loggers that install their own handlers and would otherwise bypass ours.
 _HIJACKED_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
+#: Third-party loggers held at WARNING regardless of the application level.
+#: botocore in particular logs every S3 request and response at DEBUG,
+#: including full headers and signing details. In local development that
+#: buries our own lines under thousands of theirs, and anywhere else it writes
+#: request metadata into the log for no operational benefit.
+_NOISY_LOGGERS = ("boto3", "botocore", "s3transfer", "urllib3")
+
 
 def configure_logging(level: int = logging.INFO) -> None:
     """Route all logging through the JSON formatter.
@@ -62,3 +69,5 @@ def configure_logging(level: int = logging.INFO) -> None:
         logger = logging.getLogger(name)
         logger.handlers = []
         logger.propagate = True
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(max(level, logging.WARNING))

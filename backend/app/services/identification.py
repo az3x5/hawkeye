@@ -18,6 +18,7 @@ import numpy as np
 
 from app.connectors.filesystem.object_store import sha256_bytes
 from app.domain.audit import SYSTEM_ACTOR, Actor, AuditAction, AuditEvent, AuditLog
+from app.domain.detection import BoundingBox
 from app.domain.identity import (
     DecisionOutcome,
     DecisionThresholds,
@@ -45,6 +46,24 @@ class IdentificationResult:
 
     identification_uuid: UUID
     decision: IdentityDecision
+
+
+@dataclass(frozen=True, slots=True)
+class LiveFaceEmbedding:
+    """One located face and the embedding produced from its aligned crop."""
+
+    box: BoundingBox
+    detection_score: float
+    embedding: FaceEmbedding
+
+
+@dataclass(frozen=True, slots=True)
+class LiveFrameEmbeddings:
+    """All faces located in one live frame, in original pixel coordinates."""
+
+    width: int
+    height: int
+    faces: tuple[LiveFaceEmbedding, ...]
 
 
 class IdentificationService:
@@ -101,6 +120,32 @@ class IdentificationService:
                 f"{len(faces)} faces were detected; identification requires exactly one"
             )
         return self._recognizer.embed(faces[0])  # type: ignore[attr-defined,no-any-return]
+
+    async def embed_live_frame(self, image_bytes: bytes) -> LiveFrameEmbeddings:
+        """Detect and embed every face in a live frame without choosing one.
+
+        This is deliberately separate from :meth:`embed_query`: an ordinary
+        identification request remains strict about containing exactly one
+        face, while a live source needs the location and result for each face.
+        """
+        if self._detector is None or self._recognizer is None:
+            raise IdentificationError("identification models are not configured")
+
+        decoded = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if decoded is None:
+            raise IdentificationError("the live frame could not be decoded")
+
+        height, width = decoded.shape[:2]
+        aligned_faces = self._detector.detect_and_align(decoded.astype(np.uint8))  # type: ignore[attr-defined]
+        faces = tuple(
+            LiveFaceEmbedding(
+                box=aligned.detection.box,
+                detection_score=aligned.detection.score,
+                embedding=self._recognizer.embed(aligned),  # type: ignore[attr-defined,no-any-return]
+            )
+            for aligned in aligned_faces
+        )
+        return LiveFrameEmbeddings(width=width, height=height, faces=faces)
 
     async def identify(
         self, embedding: FaceEmbedding, *, query_bytes: bytes, actor: Actor | None = None

@@ -9,8 +9,10 @@
 # WireGuard: the application still speaks plain HTTP, and that encryption is
 # what stands between a session token and the network.
 #
-# Postgres, Redis and Qdrant stay unpublished. Qdrant in particular holds
-# biometric embeddings.
+# Postgres, Redis, Qdrant and MinIO stay unpublished. Qdrant holds biometric
+# embeddings and MinIO holds the media bytes themselves; the base topology
+# publishes MinIO on loopback for local tests, which a deployment does not
+# want and does not need, because the API reaches it over the internal network.
 #
 # Every service also gets a CPU and memory ceiling. The host has 16 cores and
 # 30 GB; without limits one runaway inference job or one Postgres query can
@@ -67,4 +69,11 @@ services:
     deploy:
       resources:
         limits: {cpus: "2.0", memory: 4g}
+    restart: unless-stopped
+
+  minio:
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 2g}
+    ports: !override []
     restart: unless-stopped

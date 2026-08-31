@@ -47,3 +47,21 @@ def test_configure_logging_reclaims_server_loggers() -> None:
     root_handlers = logging.getLogger().handlers
     assert len(root_handlers) == 1
     assert isinstance(root_handlers[0].formatter, JsonFormatter)
+
+
+class TestThirdPartyNoise:
+    """botocore logs every S3 request and response, headers included.
+
+    At the application's DEBUG level that buries our own lines under thousands
+    of theirs, and it writes request metadata into the log for no operational
+    benefit.
+    """
+
+    def test_aws_sdk_loggers_are_held_at_warning_in_debug(self) -> None:
+        configure_logging(logging.DEBUG)
+        for name in ("boto3", "botocore", "s3transfer", "urllib3"):
+            assert logging.getLogger(name).level == logging.WARNING
+
+    def test_a_stricter_application_level_still_wins(self) -> None:
+        configure_logging(logging.ERROR)
+        assert logging.getLogger("botocore").level == logging.ERROR

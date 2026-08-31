@@ -1,0 +1,82 @@
+# Temporary high-throughput topology for the Dheni all-photo re-enrolment.
+#
+# With six worker replicas, the declared CPU ceilings total 13.9 cores on the
+# 16-core deployment host (86.9%):
+#   api 2 + workers 9 + postgres 1 + qdrant 1 + redis .15 + frontend .25
+#   + importer .5
+# The remaining 2+ cores belong to the host and Docker itself, keeping the
+# workload below the operator's 90% ceiling.
+# Declared memory ceilings total 25.5 GiB of the host's 30 GiB usable RAM;
+# importer scratch space is RAM-backed to avoid writing every source photo to
+# Docker's overlay filesystem before it is uploaded.
+services:
+  api:
+    environment:
+      FACEID_RATE_LIMIT_ENROL: "600"
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 4g}
+
+  frontend:
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 1g}
+
+  worker:
+    environment:
+      FACEID_SCRFD_INTRA_OP_THREADS: "2"
+      FACEID_ADAFACE_TORCH_THREADS: "2"
+    deploy:
+      resources:
+        limits: {cpus: "1.5", memory: 2g}
+
+  postgres:
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 3g}
+
+  redis:
+    deploy:
+      resources:
+        limits: {cpus: "0.15", memory: 512m}
+
+  qdrant:
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 3g}
+
+  importer:
+    image: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+    # Match the owner of the protected host operations directory. This avoids
+    # widening its 0700/0600 permissions just to admit the container.
+    user: "1000:1000"
+    command:
+      - python
+      - -u
+      - /ops/import_dheni.py
+      - --manifest
+      - /ops/people.csv
+      - --checkpoint
+      - /ops/dheni-all-import.sqlite
+      - --workers
+      # Keep enough source requests in flight to feed all six CPU enrollment
+      # workers while remaining below the source API's timeout threshold.
+      - "18"
+      # Resume just before the last submitted frontier. The photo checkpoint
+      # makes the overlap idempotent while avoiding a 12,800-person rescan.
+      - --offset
+      - "12800"
+    env_file: [/home/newbie/hawkeye-ops/.env]
+    environment:
+      HAWKEYE_API: http://api:8000
+    volumes:
+      - /home/newbie/hawkeye-ops:/ops
+    tmpfs:
+      - /tmp:size=1536m,mode=1777
+    depends_on:
+      api: {condition: service_started}
+    networks: [faceid]
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 2g}
+    restart: unless-stopped
