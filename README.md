@@ -244,8 +244,28 @@ two together stay well inside a 16-core host.
 The deployment overlay adds a CPU and memory ceiling to every container, so no
 single service — a runaway inference job, an unbounded Postgres query — can
 take the whole machine and stall the health checks that would report it. The
-ceilings overlap on CPU and are not a partition of the host; the memory
-ceilings sum to roughly 23 GB of 30 GB, leaving the host its own headroom.
+ceilings overlap on CPU and are not a partition of the host. Memory ceilings
+sum to less than 24 GB on the 30 GB cyber-ai host, preserving roughly 20% for
+the operating system and filesystem cache even at every container's limit.
+
+### Dhivehi specialist models
+
+Translation, neural transliteration, speech recognition and Thaana OCR run in
+the private `dhivehi-ai` service. Its registry pins every public artifact to an
+immutable Hugging Face revision and reports `installed`, `not_installed` or
+`blocked` from the actual cache. The process serializes inference and retains
+only the most recently used heavy model, allowing the full artifact set to
+live on disk without requiring all models to fit in memory simultaneously.
+
+Download the pinned public artifacts into the named model volume with:
+
+```bash
+docker compose run --rm dhivehi-ai python -m app.prefetch_dhivehi_models
+```
+
+The Dhivehi-specific embedding model uses its own versioned Qdrant collection;
+changing the model never mixes incompatible vectors. Model-card metrics are
+displayed as provenance, not treated as independent production validation.
 
 ### Running on a GPU
 
@@ -259,10 +279,8 @@ a provider is missing, which would let a deployment believe it is on the GPU
 while it is not, so an unavailable provider or an unavailable CUDA runtime is a
 startup error instead.
 
-The host and image side is not configuration, and none of it is done on
-`cyber-ai` today. That machine has an RTX 5060 (Blackwell, GB206) which is
-present on the PCI bus but has no driver loaded, no `/dev/nvidia*` and no
-NVIDIA runtime registered with Docker. Enabling it needs root on the host:
+The host and image side is not configuration. A GPU deployment additionally
+needs all of the following; the application refuses a partial setup:
 
 1. an NVIDIA driver new enough for Blackwell (570 or later),
 2. `nvidia-container-toolkit`, and `nvidia-ctk runtime configure --runtime=docker`,

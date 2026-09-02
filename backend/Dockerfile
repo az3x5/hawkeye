@@ -6,6 +6,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
+# libsndfile decodes uploaded speech without invoking a shell or accepting
+# arbitrary codecs. ffmpeg is intentionally absent; unsupported media is
+# rejected and can be normalized by the separate ingestion pipeline.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 # CPU-only torch: the default index ships CUDA wheels that are several GB and
 # useless without a GPU.

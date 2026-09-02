@@ -18,6 +18,11 @@ dependencies = [
     #   --index-url https://download.pytorch.org/whl/cpu
     "torch>=2.4",
     "sentence-transformers>=3.1,<6",
+    "transformers>=4.52,<5",
+    "accelerate>=1.2,<2",
+    "pillow>=11,<13",
+    "soundfile>=0.13,<1",
+    "librosa>=0.11,<1",
     "safetensors>=0.4",
     "qdrant-client>=1.12",
     "redis>=5.0",
@@ -82,6 +87,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "sentence_transformers.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["transformers.*", "librosa.*", "soundfile.*", "PIL.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "huggingface_hub.*"
 ignore_missing_imports = true
 
 # boto3/botocore ship no type information.

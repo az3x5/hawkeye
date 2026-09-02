@@ -31,6 +31,7 @@ from app.domain.identity import DecisionThresholds
 from app.domain.processing import ProcessingMetrics
 from app.services.administration import AccountAdministration, TokenAdministration
 from app.services.authentication import AuthenticationService
+from app.services.dhivehi_ai_client import DhivehiAIClient
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
 from app.services.identification import IdentificationService
@@ -48,6 +49,14 @@ def _postgres(request: Request) -> PostgresConnector:
     if connector is None:
         raise ServiceUnavailableError("the metadata store is not available")
     return connector  # type: ignore[no-any-return]
+
+
+def get_dhivehi_ai_client(request: Request) -> DhivehiAIClient:
+    """Return the internal specialist client without exposing its URL."""
+    client = getattr(request.app.state, "dhivehi_ai", None)
+    if not isinstance(client, DhivehiAIClient):
+        raise ServiceUnavailableError("specialist Dhivehi AI is not configured")
+    return client
 
 
 async def get_enrolment_service(request: Request) -> AsyncIterator[EnrolmentService]:

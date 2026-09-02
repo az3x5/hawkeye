@@ -26,14 +26,14 @@ services:
   api:
     deploy:
       resources:
-        limits: {cpus: "4.0", memory: 6g}
+        limits: {cpus: "3.0", memory: 3500m}
     ports: !override ["${BIND_ADDR:?set BIND_ADDR to the interface to publish on}:8000:8000"]
     restart: unless-stopped
 
   frontend:
     deploy:
       resources:
-        limits: {cpus: "1.0", memory: 1g}
+        limits: {cpus: "1.0", memory: 750m}
     ports: !override ["${BIND_ADDR}:3000:3000"]
     environment:
       FACEID_API_URL: http://api:8000
@@ -43,37 +43,43 @@ services:
   worker:
     deploy:
       resources:
-        limits: {cpus: "8.0", memory: 8g}
+        limits: {cpus: "6.0", memory: 4g}
     restart: unless-stopped
 
   language-worker:
     deploy:
       resources:
-        limits: {cpus: "4.0", memory: 5g}
+        limits: {cpus: "2.0", memory: 2500m}
+    restart: unless-stopped
+
+  dhivehi-ai:
+    deploy:
+      resources:
+        limits: {cpus: "8.0", memory: 7g}
     restart: unless-stopped
 
   postgres:
     deploy:
       resources:
-        limits: {cpus: "2.0", memory: 4g}
+        limits: {cpus: "2.0", memory: 2500m}
     ports: !override []
     restart: unless-stopped
 
   redis:
     deploy:
       resources:
-        limits: {cpus: "0.5", memory: 512m}
+        limits: {cpus: "0.5", memory: 256m}
     restart: unless-stopped
 
   qdrant:
     deploy:
       resources:
-        limits: {cpus: "2.0", memory: 4g}
+        limits: {cpus: "2.0", memory: 2g}
     restart: unless-stopped
 
   minio:
     deploy:
       resources:
-        limits: {cpus: "2.0", memory: 2g}
+        limits: {cpus: "1.0", memory: 1g}
     ports: !override []
     restart: unless-stopped

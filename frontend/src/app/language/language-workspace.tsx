@@ -1,14 +1,14 @@
 "use client";
 
-import { ArrowLeftRight, Check, Clipboard, Loader2, ScanText } from "lucide-react";
+import { BrainCircuit, Check, Clipboard, Loader2, ScanText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { normalizeAction, transliterateAction } from "@/app/language/actions";
+import { neuralInferenceAction, normalizeAction } from "@/app/language/actions";
 import { StatusBadge } from "@/components/states/status-badge";
 import type {
   LanguageNormalization,
-  LanguageTransliteration,
-  TransliterationDirection,
+  DhivehiInference,
+  DhivehiTextTask,
 } from "@/lib/types";
 
 const FIELD =
@@ -17,11 +17,10 @@ const FIELD =
 export function LanguageWorkspace() {
   const router = useRouter();
   const [text, setText] = useState("");
-  const [direction, setDirection] =
-    useState<TransliterationDirection>("latin_to_thaana");
+  const [task, setTask] = useState<DhivehiTextTask>("latin_to_thaana");
   const [normalization, setNormalization] = useState<LanguageNormalization | null>(null);
-  const [transliteration, setTransliteration] = useState<LanguageTransliteration | null>(null);
-  const [busy, setBusy] = useState<"normalize" | "transliterate" | null>(null);
+  const [inference, setInference] = useState<DhivehiInference | null>(null);
+  const [busy, setBusy] = useState<"normalize" | "infer" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -38,23 +37,23 @@ export function LanguageWorkspace() {
     setNormalization(result.normalization);
   }
 
-  async function convert() {
-    setBusy("transliterate");
+  async function runModel() {
+    setBusy("infer");
     setError(null);
     setCopied(false);
-    const result = await transliterateAction(text, direction);
+    const result = await neuralInferenceAction(text, task);
     setBusy(null);
     if (!result.ok) {
       setError(result.message);
       if (result.signedOut) router.replace("/sign-in");
       return;
     }
-    setTransliteration(result.transliteration);
+    setInference(result.inference);
   }
 
   async function copyOutput() {
-    if (transliteration === null) return;
-    await navigator.clipboard.writeText(transliteration.output);
+    if (inference === null) return;
+    await navigator.clipboard.writeText(inference.text);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }
@@ -101,33 +100,45 @@ export function LanguageWorkspace() {
           </button>
           <button
             type="button"
-            onClick={convert}
+            onClick={runModel}
             disabled={busy !== null || text.trim() === ""}
             className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
           >
-            {busy === "transliterate" ? (
+            {busy === "infer" ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             ) : (
-              <ArrowLeftRight className="size-4" aria-hidden="true" />
+              <BrainCircuit className="size-4" aria-hidden="true" />
             )}
-            Transliterate
+            Run specialist model
           </button>
         </div>
 
         <fieldset className="mt-4 border-t border-line pt-4">
-          <legend className="mb-2 text-xs font-medium text-ink-muted">Direction</legend>
+          <legend className="mb-2 text-xs font-medium text-ink-muted">Operation</legend>
           <div className="grid gap-2 sm:grid-cols-2">
-            <DirectionOption
-              checked={direction === "latin_to_thaana"}
+            <TaskOption
+              checked={task === "latin_to_thaana"}
               label="Latin → Thaana"
               value="latin_to_thaana"
-              onChange={setDirection}
+              onChange={setTask}
             />
-            <DirectionOption
-              checked={direction === "thaana_to_latin"}
+            <TaskOption
+              checked={task === "thaana_to_latin"}
               label="Thaana → Latin"
               value="thaana_to_latin"
-              onChange={setDirection}
+              onChange={setTask}
+            />
+            <TaskOption
+              checked={task === "dhivehi_to_english"}
+              label="Dhivehi → English"
+              value="dhivehi_to_english"
+              onChange={setTask}
+            />
+            <TaskOption
+              checked={task === "english_to_dhivehi"}
+              label="English → Dhivehi"
+              value="english_to_dhivehi"
+              onChange={setTask}
             />
           </div>
         </fieldset>
@@ -140,20 +151,22 @@ export function LanguageWorkspace() {
       </section>
 
       <div className="space-y-4">
-        <section className="panel" aria-labelledby="transliteration-heading">
+        <section className="panel" aria-labelledby="model-output-heading">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <div>
-              <h2 id="transliteration-heading" className="text-sm font-semibold text-ink">
-                Transliteration
+              <h2 id="model-output-heading" className="text-sm font-semibold text-ink">
+                Model output
               </h2>
-              {transliteration ? (
-                <p className="mt-0.5 text-xs text-ink-faint">{transliteration.model_version}</p>
+              {inference ? (
+                <p className="mt-0.5 text-xs text-ink-faint">
+                  {inference.model} · {inference.model_revision.slice(0, 8)}
+                </p>
               ) : null}
             </div>
             <button
               type="button"
               onClick={copyOutput}
-              disabled={transliteration === null}
+              disabled={inference === null}
               className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted disabled:opacity-40"
             >
               {copied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
@@ -161,15 +174,16 @@ export function LanguageWorkspace() {
             </button>
           </div>
           <div className="min-h-40 whitespace-pre-wrap px-4 py-4 text-lg leading-8 text-ink" dir="auto">
-            {transliteration?.output ?? (
-              <span className="text-sm text-ink-faint">The converted text will appear here.</span>
+            {inference?.text ?? (
+              <span className="text-sm text-ink-faint">The model output will appear here.</span>
             )}
           </div>
-          {transliteration?.warnings.map((warning) => (
-            <p key={warning} className="border-t border-line px-4 py-2 text-xs text-review">
-              {warning}
-            </p>
-          ))}
+          {inference ? (
+            <div className="border-t border-line px-4 py-3 text-xs">
+              <p className="text-ink-muted">{inference.quality_summary}</p>
+              <p className="mt-1 text-review">{inference.limitation}</p>
+            </div>
+          ) : null}
         </section>
 
         <section className="panel" aria-labelledby="analysis-heading">
@@ -207,7 +221,7 @@ export function LanguageWorkspace() {
   );
 }
 
-function DirectionOption({
+function TaskOption({
   checked,
   label,
   value,
@@ -215,8 +229,8 @@ function DirectionOption({
 }: {
   checked: boolean;
   label: string;
-  value: TransliterationDirection;
-  onChange: (value: TransliterationDirection) => void;
+  value: DhivehiTextTask;
+  onChange: (value: DhivehiTextTask) => void;
 }) {
   return (
     <label

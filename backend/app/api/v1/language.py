@@ -6,10 +6,11 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import (
+    get_dhivehi_ai_client,
     get_language_document_service,
     get_language_search_service,
 )
@@ -18,6 +19,8 @@ from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
 from app.domain.jobs import ProcessingState
 from app.domain.language import PrimaryScript, Script, TransliterationDirection
+from app.services.dhivehi_ai_client import DhivehiAIClient, DhivehiAIServiceError
+from app.services.dhivehi_models import DhivehiTask
 from app.services.language import NORMALIZER_VERSION, normalize_text, transliterate
 from app.services.language_search import (
     DocumentSubmission,
@@ -33,6 +36,20 @@ class LanguageDocumentNotFoundError(FaceIdError):
 
     status_code = status.HTTP_404_NOT_FOUND
     code = "language_document_not_found"
+
+
+class DhivehiInferenceUnavailableError(FaceIdError):
+    """Specialist inference is not able to execute the requested model."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    code = "dhivehi_inference_unavailable"
+
+
+class LanguageUploadTooLargeError(FaceIdError):
+    """A speech or OCR upload exceeded its bounded request limit."""
+
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    code = "language_upload_too_large"
 
 
 _RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -81,6 +98,48 @@ class TransliterationResponse(BaseModel):
     direction: TransliterationDirection
     model_version: str
     warnings: list[str]
+
+
+class NeuralTextRequest(TextRequest):
+    """Text submitted to one explicit neural language operation."""
+
+    task: Literal[
+        DhivehiTask.LATIN_TO_THAANA,
+        DhivehiTask.THAANA_TO_LATIN,
+        DhivehiTask.DHIVEHI_TO_ENGLISH,
+        DhivehiTask.ENGLISH_TO_DHIVEHI,
+    ]
+
+
+class NeuralInferenceResponse(BaseModel):
+    """Model output with exact provenance and an accuracy caveat."""
+
+    task: str
+    text: str
+    model: str
+    model_revision: str
+    quality_summary: str
+    limitation: str
+
+
+class ModelCapabilityResponse(BaseModel):
+    """Truthful availability and evaluation metadata for one task."""
+
+    task: str
+    model_id: str
+    revision: str
+    license: str
+    runtime: str
+    status: str
+    quality_summary: str
+    limitation: str
+    loaded: bool
+
+
+class ModelCapabilitiesResponse(BaseModel):
+    """All specialist models known to the deployment."""
+
+    capabilities: list[ModelCapabilityResponse]
 
 
 class DocumentRequest(BaseModel):
@@ -201,6 +260,97 @@ async def transliterate_text(
         model_version=result.model_version,
         warnings=list(result.warnings),
     )
+
+
+@router.get(
+    "/models",
+    response_model=ModelCapabilitiesResponse,
+    responses=_RESPONSES | {503: {"model": ErrorResponse}},
+    summary="List installed, available and blocked Dhivehi models",
+)
+async def language_models(
+    client: Annotated[DhivehiAIClient, Depends(get_dhivehi_ai_client)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+) -> ModelCapabilitiesResponse:
+    """Expose actual deployment state rather than a static feature claim."""
+    try:
+        capabilities = await client.capabilities()
+    except DhivehiAIServiceError as exc:
+        raise DhivehiInferenceUnavailableError(str(exc)) from exc
+    return ModelCapabilitiesResponse(
+        capabilities=[ModelCapabilityResponse.model_validate(item) for item in capabilities]
+    )
+
+
+@router.post(
+    "/infer",
+    response_model=NeuralInferenceResponse,
+    responses=_RESPONSES | {503: {"model": ErrorResponse}},
+    summary="Translate or neurally transliterate Dhivehi text",
+)
+async def infer_text(
+    body: NeuralTextRequest,
+    client: Annotated[DhivehiAIClient, Depends(get_dhivehi_ai_client)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+) -> NeuralInferenceResponse:
+    """Run a pinned specialist model with explicit direction and provenance."""
+    try:
+        result = await client.text(DhivehiTask(body.task), body.text)
+    except DhivehiAIServiceError as exc:
+        raise DhivehiInferenceUnavailableError(str(exc)) from exc
+    return NeuralInferenceResponse.model_validate(result)
+
+
+async def _bounded_upload(upload: UploadFile, limit: int) -> bytes:
+    """Read an upload incrementally and reject it before unbounded buffering."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await upload.read(min(1024 * 1024, limit - total + 1)):
+        total += len(chunk)
+        if total > limit:
+            raise LanguageUploadTooLargeError(f"upload exceeds {limit} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post(
+    "/speech/transcribe",
+    response_model=NeuralInferenceResponse,
+    responses=_RESPONSES | {503: {"model": ErrorResponse}},
+    summary="Transcribe Dhivehi speech into Thaana",
+)
+async def transcribe_speech(
+    client: Annotated[DhivehiAIClient, Depends(get_dhivehi_ai_client)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+    file: Annotated[UploadFile, File(description="WAV, FLAC or OGG Dhivehi speech")],
+) -> NeuralInferenceResponse:
+    """Forward bounded audio to the isolated Dhivehi ASR model."""
+    content = await _bounded_upload(file, 50 * 1024 * 1024)
+    try:
+        result = await client.speech(content, file.content_type or "application/octet-stream")
+    except DhivehiAIServiceError as exc:
+        raise DhivehiInferenceUnavailableError(str(exc)) from exc
+    return NeuralInferenceResponse.model_validate(result)
+
+
+@router.post(
+    "/ocr",
+    response_model=NeuralInferenceResponse,
+    responses=_RESPONSES | {503: {"model": ErrorResponse}},
+    summary="Recognize Thaana text in an image crop",
+)
+async def recognize_thaana(
+    client: Annotated[DhivehiAIClient, Depends(get_dhivehi_ai_client)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+    file: Annotated[UploadFile, File(description="Image containing Thaana text")],
+) -> NeuralInferenceResponse:
+    """Forward a bounded text crop to the isolated Dhivehi OCR model."""
+    content = await _bounded_upload(file, 25 * 1024 * 1024)
+    try:
+        result = await client.ocr(content, file.content_type or "application/octet-stream")
+    except DhivehiAIServiceError as exc:
+        raise DhivehiInferenceUnavailableError(str(exc)) from exc
+    return NeuralInferenceResponse.model_validate(result)
 
 
 @router.post(

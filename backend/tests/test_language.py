@@ -115,6 +115,10 @@ def test_application_exposes_language_contract(settings: Settings) -> None:
     assert "/api/v1/nlp/documents" in paths
     assert "/api/v1/nlp/documents/{document_uuid}" in paths
     assert "/api/v1/nlp/search" in paths
+    assert "/api/v1/nlp/models" in paths
+    assert "/api/v1/nlp/infer" in paths
+    assert "/api/v1/nlp/speech/transcribe" in paths
+    assert "/api/v1/nlp/ocr" in paths
 
 
 class FakeDocuments:

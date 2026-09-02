@@ -26,7 +26,11 @@ const READABLE = [
   /^system\/metrics$/,
 ];
 
-const WRITABLE = [/^identifications\/[0-9a-f-]{36}\/review$/];
+const WRITABLE = [
+  /^identifications\/[0-9a-f-]{36}\/review$/,
+  /^nlp\/speech\/transcribe$/,
+  /^nlp\/ocr$/,
+];
 
 function refuse(): NextResponse {
   return NextResponse.json(
@@ -58,12 +62,14 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
     );
   }
 
+  const isUpload = path === "nlp/speech/transcribe" || path === "nlp/ocr";
+  const contentType = request.headers.get("content-type");
   const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}`, {
     method: request.method,
     headers:
       request.method === "POST"
         ? {
-            "Content-Type": "application/json",
+            ...(contentType === null ? {} : { "Content-Type": contentType }),
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           }
@@ -71,13 +77,18 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Accept: path === "system/metrics" || path === "statistics" ? "application/json" : "image/jpeg",
             Authorization: `Bearer ${token}`,
           },
-    body: request.method === "POST" ? await request.text() : undefined,
+    body:
+      request.method === "POST"
+        ? isUpload
+          ? await request.arrayBuffer()
+          : await request.text()
+        : undefined,
     cache: "no-store",
   });
 
   const headers = new Headers();
-  const contentType = upstream.headers.get("content-type");
-  if (contentType !== null) headers.set("content-type", contentType);
+  const upstreamContentType = upstream.headers.get("content-type");
+  if (upstreamContentType !== null) headers.set("content-type", upstreamContentType);
   // Biometric images must not linger in shared caches.
   headers.set("cache-control", "private, no-store");
 

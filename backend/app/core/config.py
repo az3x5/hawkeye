@@ -207,6 +207,18 @@ class Settings(BaseSettings):
     language_embedding_batch_size: int = Field(default=16, ge=1, le=256)
     language_embedding_max_tokens: int = Field(default=512, ge=32, le=8192)
 
+    # Specialist Dhivehi inference is isolated in its own process. The API
+    # never imports or loads these large models, which keeps face recognition
+    # responsive while a translation or OCR model is swapped into memory.
+    dhivehi_ai_url: str | None = Field(
+        default=None,
+        description="Internal URL of the specialist Dhivehi inference service.",
+    )
+    dhivehi_ai_timeout_seconds: float = Field(default=300.0, ge=1.0, le=1800.0)
+    dhivehi_ai_max_text_chars: int = Field(default=20_000, ge=1, le=100_000)
+    dhivehi_ai_max_audio_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
+    dhivehi_ai_max_image_bytes: int = Field(default=25 * 1024 * 1024, ge=1024)
+
     @model_validator(mode="after")
     def validate_object_store_backend(self) -> Settings:
         """Refuse to start with an S3 backend that has no credentials.

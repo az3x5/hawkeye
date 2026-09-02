@@ -36,10 +36,11 @@ services:
       FACEID_ADAFACE_TORCH_THREADS: ${API_MODEL_THREADS:-2}
       FACEID_SCRFD_PROVIDERS: ${SCRFD_PROVIDERS:-["CPUExecutionProvider"]}
       FACEID_ADAFACE_DEVICE: ${ADAFACE_DEVICE:-cpu}
-      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
-      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-alakxender/e5-dhivehi-combined-mnr}
+      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-65ead4fb4e6c5f72ef08eeed13eb2006bfa5f7ad}
       FACEID_LANGUAGE_EMBEDDING_DEVICE: ${LANGUAGE_EMBEDDING_DEVICE:-cpu}
       FACEID_LANGUAGE_EMBEDDING_BATCH_SIZE: ${LANGUAGE_EMBEDDING_BATCH_SIZE:-16}
+      FACEID_DHIVEHI_AI_URL: http://dhivehi-ai:8010
       HF_HOME: /srv/model-cache
     ports: ["127.0.0.1:8000:8000"]
     # Weights are mounted read-only, never baked into the image or committed.
@@ -53,6 +54,7 @@ services:
       redis: {condition: service_healthy}
       qdrant: {condition: service_started}
       minio: {condition: service_healthy}
+      dhivehi-ai: {condition: service_healthy}
     networks: [faceid]
 
   frontend:
@@ -120,8 +122,8 @@ services:
       FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
-      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
-      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-alakxender/e5-dhivehi-combined-mnr}
+      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-65ead4fb4e6c5f72ef08eeed13eb2006bfa5f7ad}
       FACEID_LANGUAGE_EMBEDDING_DEVICE: ${LANGUAGE_EMBEDDING_DEVICE:-cpu}
       FACEID_LANGUAGE_EMBEDDING_BATCH_SIZE: ${LANGUAGE_EMBEDDING_BATCH_SIZE:-16}
       HF_HOME: /srv/model-cache
@@ -131,6 +133,42 @@ services:
       qdrant: {condition: service_started}
     volumes:
       - "language-model-cache-v2:/srv/model-cache"
+    networks: [faceid]
+
+  dhivehi-ai:
+    image: hawkeye-api:dev
+    command:
+      [
+        "uvicorn",
+        "app.dhivehi_ai:get_asgi_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8010",
+        "--workers",
+        "1",
+      ]
+    environment:
+      DHIVEHI_AI_CACHE_DIR: /srv/dhivehi-model-cache
+      DHIVEHI_AI_EMBEDDING_CACHE_DIR: /srv/language-model-cache/hub
+      DHIVEHI_AI_DEVICE: ${DHIVEHI_AI_DEVICE:-cpu}
+      DHIVEHI_AI_TORCH_THREADS: ${DHIVEHI_AI_TORCH_THREADS:-8}
+      HF_HOME: /srv/dhivehi-model-cache
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - "dhivehi-model-cache:/srv/dhivehi-model-cache"
+      - "language-model-cache-v2:/srv/language-model-cache:ro"
     networks: [faceid]
 
   minio:
@@ -197,3 +235,4 @@ volumes:
   redis-data:
   qdrant-data:
   language-model-cache-v2:
+  dhivehi-model-cache:

@@ -3,6 +3,7 @@
 import {
   ApiError,
   createLanguageDocument,
+  inferDhivehiText,
   NotAuthenticatedError,
   normalizeLanguageText,
   searchLanguageDocuments,
@@ -14,6 +15,8 @@ import type {
   LanguageSearchResponse,
   LanguageTransliteration,
   TransliterationDirection,
+  DhivehiInference,
+  DhivehiTextTask,
 } from "@/lib/types";
 
 type Failure = { ok: false; code: string; message: string; signedOut?: boolean };
@@ -24,6 +27,10 @@ export type NormalizeActionResult =
 
 export type TransliterateActionResult =
   | { ok: true; transliteration: LanguageTransliteration }
+  | Failure;
+
+export type NeuralInferenceActionResult =
+  | { ok: true; inference: DhivehiInference }
   | Failure;
 
 export type CreateDocumentActionResult =
@@ -55,6 +62,19 @@ export async function transliterateAction(
       ok: true,
       transliteration: await transliterateLanguageText(text, direction),
     };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function neuralInferenceAction(
+  text: string,
+  task: DhivehiTextTask,
+): Promise<NeuralInferenceActionResult> {
+  const invalid = validateText(text);
+  if (invalid !== null) return invalid;
+  try {
+    return { ok: true, inference: await inferDhivehiText(text, task) };
   } catch (error) {
     return failure(error);
   }

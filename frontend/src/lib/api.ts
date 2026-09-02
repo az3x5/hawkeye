@@ -29,6 +29,9 @@ import type {
   LanguageDocument,
   LanguageSearchResponse,
   LanguageTransliteration,
+  DhivehiInference,
+  DhivehiModelCapabilities,
+  DhivehiTextTask,
   LiveFrameAnalysis,
   ReviewOutcome,
   ReviewQueue,
@@ -156,6 +159,23 @@ export function transliterateLanguageText(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, direction }),
   });
+}
+
+/** Use a pinned neural model for translation or context-aware transliteration. */
+export function inferDhivehiText(
+  text: string,
+  task: DhivehiTextTask,
+): Promise<DhivehiInference> {
+  return request<DhivehiInference>("/api/v1/nlp/infer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, task }),
+  });
+}
+
+/** Actual specialist model state reported by the inference process. */
+export function fetchDhivehiModels(): Promise<DhivehiModelCapabilities> {
+  return request<DhivehiModelCapabilities>("/api/v1/nlp/models");
 }
 
 /** Persist a language document and schedule its semantic embedding. */

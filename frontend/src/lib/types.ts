@@ -262,6 +262,36 @@ export type Scope = (typeof SCOPES)[number];
 export type LanguageScript = "thaana" | "latin" | "number" | "other";
 export type PrimaryScript = "thaana" | "latin" | "mixed" | "none";
 export type TransliterationDirection = "latin_to_thaana" | "thaana_to_latin";
+export type DhivehiTextTask =
+  | "latin_to_thaana"
+  | "thaana_to_latin"
+  | "dhivehi_to_english"
+  | "english_to_dhivehi";
+
+export interface DhivehiInference {
+  task: string;
+  text: string;
+  model: string;
+  model_revision: string;
+  quality_summary: string;
+  limitation: string;
+}
+
+export interface DhivehiModelCapability {
+  task: string;
+  model_id: string;
+  revision: string;
+  license: string;
+  runtime: string;
+  status: string;
+  quality_summary: string;
+  limitation: string;
+  loaded: boolean;
+}
+
+export interface DhivehiModelCapabilities {
+  capabilities: DhivehiModelCapability[];
+}
 
 export interface LanguageScriptSpan {
   text: string;

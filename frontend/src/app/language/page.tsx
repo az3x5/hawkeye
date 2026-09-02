@@ -1,14 +1,20 @@
 import { redirect } from "next/navigation";
 import { LanguageWorkspace } from "@/app/language/language-workspace";
+import { MediaLanguageTools } from "@/app/language/media-language-tools";
+import { ModelStatus } from "@/app/language/model-status";
 import { SemanticSearch } from "@/app/language/semantic-search";
 import { PageHeader } from "@/components/shell/page-header";
-import { fetchIdentity } from "@/lib/api";
+import { fetchDhivehiModels, fetchIdentity } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
 export default async function LanguagePage() {
   const identity = await fetchIdentity().catch(() => null);
   if (identity === null) redirect("/sign-in");
+
+  const models = identity.scopes.includes("language")
+    ? await fetchDhivehiModels().catch(() => ({ capabilities: [] }))
+    : { capabilities: [] };
 
   return (
     <>
@@ -19,6 +25,8 @@ export default async function LanguagePage() {
       {identity.scopes.includes("language") ? (
         <>
           <LanguageWorkspace />
+          <MediaLanguageTools />
+          <ModelStatus models={models.capabilities} />
           <SemanticSearch />
         </>
       ) : (

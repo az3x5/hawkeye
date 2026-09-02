@@ -36,6 +36,7 @@ from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
 from app.core.readiness import clear_probes, register_probe
 from app.domain.storage import BlobStore
+from app.services.dhivehi_ai_client import DhivehiAIClient
 from app.services.language_embeddings import MultilingualE5Embedder
 from app.services.media import BUCKETS
 
@@ -133,9 +134,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         logger.warning("language embedding model is not configured; semantic search will fail")
 
+    app.state.dhivehi_ai = None
+    if settings.dhivehi_ai_url:
+        app.state.dhivehi_ai = DhivehiAIClient(
+            settings.dhivehi_ai_url, timeout_seconds=settings.dhivehi_ai_timeout_seconds
+        )
+
     try:
         yield
     finally:
+        if app.state.dhivehi_ai is not None:
+            await app.state.dhivehi_ai.close()
         await redis.close()
         await qdrant.close()
         await postgres.close()
