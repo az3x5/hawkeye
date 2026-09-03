@@ -70,6 +70,9 @@ export class NotAuthenticatedError extends Error {
   }
 }
 
+const STATUS_TIMEOUT_MS = 3_000;
+const SIGN_IN_TIMEOUT_MS = 8_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await readToken();
   if (token === null) throw new NotAuthenticatedError();
@@ -108,6 +111,7 @@ export async function fetchReadiness(): Promise<Readiness | null> {
     const response = await fetch(`${apiBaseUrl()}/api/v1/readyz`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
     });
     // 503 is a real answer: it carries which dependency is failing.
     if (response.status !== 200 && response.status !== 503) return null;
@@ -123,6 +127,7 @@ export async function fetchHealth(): Promise<Health | null> {
     const response = await fetch(`${apiBaseUrl()}/api/v1/health`, {
       headers: { Accept: "application/json" },
       cache: "no-store",
+      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
     });
     return response.ok ? ((await response.json()) as Health) : null;
   } catch {
@@ -243,6 +248,7 @@ export async function signIn(
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ email, password }),
     cache: "no-store",
+    signal: AbortSignal.timeout(SIGN_IN_TIMEOUT_MS),
   });
 
   if (!response.ok) {

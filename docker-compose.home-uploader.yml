@@ -1,0 +1,19 @@
+name: eagleeye-home-uploader
+
+services:
+  uploader:
+    build:
+      context: ./frontend
+    image: eagleeye-home-uploader:local
+    environment:
+      FACEID_API_URL: ${CYBER_AI_API_URL:-http://100.74.113.94:8000}
+      HAWKEYE_COOKIE_SECURE: "false"
+    ports:
+      - "127.0.0.1:${HOME_UPLOADER_PORT:-3100}:3000"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+

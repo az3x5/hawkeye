@@ -95,6 +95,34 @@ Check it is up:
 curl -s http://127.0.0.1:8000/api/v1/health
 ```
 
+### Home PC face uploader
+
+Run only the web console on a trusted home PC and send enrolments to the
+authoritative cyber-ai API over Tailscale. This profile does not run a local
+database, vector store, worker, or model and does not queue face images on
+disk when cyber-ai is unavailable.
+
+```bash
+./scripts/start-home-uploader.sh
+```
+
+Open `http://127.0.0.1:3100/sign-in`. The default cyber-ai API is
+`http://100.74.113.94:8000`; override it when needed:
+
+```bash
+CYBER_AI_API_URL=http://cyber-ai:8000 HOME_UPLOADER_PORT=3100 \
+  ./scripts/start-home-uploader.sh
+```
+
+Stop the local console with:
+
+```bash
+./scripts/stop-home-uploader.sh
+```
+
+Cyber-ai must be online and reachable in Tailscale for sign-in and uploads.
+Only the web console is exposed, and only on the home PC's loopback address.
+
 ### Development without Docker
 
 ```bash
