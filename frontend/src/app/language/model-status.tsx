@@ -9,7 +9,8 @@ export function ModelStatus({ models }: { models: DhivehiModelCapability[] }) {
           Dhivehi model status
         </h2>
         <p className="mt-0.5 text-xs text-ink-faint">
-          Availability comes from the running inference service, not a static feature list.
+          Live inference-service state. Installed means the weights are on disk; loaded means
+          they are currently in memory.
         </p>
       </div>
       <div className="divide-y divide-line">
@@ -24,8 +25,10 @@ export function ModelStatus({ models }: { models: DhivehiModelCapability[] }) {
               <p className="mt-1 text-xs text-ink-faint">{model.quality_summary}</p>
               <p className="mt-1 text-xs text-review">{model.limitation}</p>
             </div>
-            <StatusBadge tone={model.status === "installed" ? "accept" : "reject"}>
-              {model.status}
+            <StatusBadge
+              tone={model.loaded || model.status === "installed" ? "accept" : "reject"}
+            >
+              {model.loaded ? "loaded" : model.status.replaceAll("_", " ")}
             </StatusBadge>
           </div>
         ))}
