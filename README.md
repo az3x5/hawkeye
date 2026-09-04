@@ -123,6 +123,19 @@ Stop the local console with:
 Cyber-ai must be online and reachable in Tailscale for sign-in and uploads.
 Only the web console is exposed, and only on the home PC's loopback address.
 
+To temporarily process faces entirely on the home PC, start the core stack
+without loading optional language embeddings into the API, then point the
+uploader at the API service on its internal Docker network:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.home-processing.yml \
+  up -d postgres redis qdrant minio dhivehi-ai api worker
+CYBER_AI_API_URL=http://api:8000 ./scripts/start-home-uploader.sh
+```
+
+The API and worker are capped at nine CPU cores in total and face images and
+embeddings remain in the laptop's Docker volumes until explicitly migrated.
+
 ### Development without Docker
 
 ```bash

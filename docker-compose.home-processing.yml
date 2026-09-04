@@ -1,0 +1,19 @@
+# Temporary face-processing profile for a laptop. It keeps optional language
+# models out of the API process so first startup cannot block face uploads.
+services:
+  api:
+    environment:
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ""
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+
+  worker:
+    deploy:
+      resources:
+        limits:
+          cpus: "7.0"
+          memory: 8G
+

@@ -8,6 +8,13 @@ services:
     environment:
       FACEID_API_URL: ${CYBER_AI_API_URL:-http://100.74.113.94:8000}
       HAWKEYE_COOKIE_SECURE: "false"
+    extra_hosts:
+      # Lets this thin console target an API bound to the home PC's loopback
+      # while retaining the remote cyber-ai URL as its normal default.
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - eagleeye-local
     ports:
       - "127.0.0.1:${HOME_UPLOADER_PORT:-3100}:3000"
     restart: unless-stopped
@@ -17,3 +24,7 @@ services:
           cpus: "2.0"
           memory: 1G
 
+networks:
+  eagleeye-local:
+    external: true
+    name: eagleeye_faceid
