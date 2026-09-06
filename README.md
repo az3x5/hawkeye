@@ -155,6 +155,23 @@ unless a real database is named, so neither can pass silently against nothing:
 FACEID_TEST_POSTGRES_DSN=postgresql://faceid:$POSTGRES_PASSWORD@127.0.0.1:5432/faceid_test FACEID_TEST_QDRANT_URL=http://127.0.0.1:6333 FACEID_TEST_REDIS_DSN=redis://127.0.0.1:6379/15 PYTHONPATH=. ../.venv/bin/pytest -q
 ```
 
+### NVIDIA GPU deployment
+
+After installing and configuring NVIDIA Container Toolkit on the host, apply
+the GPU overlay last. It derives a CUDA image from the same published backend
+artifact and gives the API and face worker access to one NVIDIA GPU:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml \
+  -f docker-compose.ghcr.yml -f docker-compose.gpu.yml build api
+docker compose -f docker-compose.yml -f docker-compose.deploy.yml \
+  -f docker-compose.ghcr.yml -f docker-compose.gpu.yml up -d api worker
+```
+
+The GPU image uses CUDA PyTorch for AdaFace and ONNX Runtime GPU for SCRFD.
+The API receives GPU access as well so live identification and dashboard GPU
+metrics work; all other services retain their CPU-safe published images.
+
 Note the Redis database index: the tests and the running `worker` service share
 one Redis instance, and the worker will happily consume a test's job off the
 default database. Database 15 keeps them apart.

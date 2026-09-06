@@ -1,0 +1,34 @@
+# NVIDIA GPU overlay. Apply this last so its CUDA image and device requests
+# override the CPU-safe defaults and the published-image deployment overlay.
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+      args:
+        BASE_IMAGE: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+    image: hawkeye-api:gpu
+    environment:
+      FACEID_SCRFD_PROVIDERS: '["CUDAExecutionProvider","CPUExecutionProvider"]'
+      FACEID_ADAFACE_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  worker:
+    image: hawkeye-api:gpu
+    environment:
+      FACEID_SCRFD_PROVIDERS: '["CUDAExecutionProvider","CPUExecutionProvider"]'
+      FACEID_ADAFACE_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+

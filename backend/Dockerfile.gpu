@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=hawkeye-api:dev
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Keep the audited application image as the base and replace only its CPU
+# runtimes. CUDA 13.0 supports Blackwell GPUs such as the RTX 5060 while the
+# NVIDIA driver remains responsible for host compatibility.
+RUN pip uninstall -y torch onnxruntime \
+    && pip install --no-cache-dir --timeout 180 --retries 20 \
+      --index-url https://download.pytorch.org/whl/cu130 \
+      torch==2.9.1 \
+    && pip install --no-cache-dir --timeout 180 --retries 20 \
+      onnxruntime-gpu==1.29.0
+
+USER faceid
+
