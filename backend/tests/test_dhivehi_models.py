@@ -56,7 +56,7 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
         captured.update(kwargs)
         return httpx.Response(
             200,
-            json={"model": "qwen3:4b", "message": {"content": "ރަނގަޅު"}},
+            json={"model": "qwen3:4b", "message": {"content": "Ready"}},
             request=httpx.Request("POST", url),
         )
 
@@ -65,14 +65,57 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
     settings = DhivehiAISettings(cache_dir=tmp_path, embedding_cache_dir=tmp_path)
     runtime = DhivehiModelRuntime(settings)
 
-    result = runtime.chat([{"role": "user", "content": "How are you?"}], "dhivehi")
+    result = runtime.chat([{"role": "user", "content": "How are you?"}], "english")
 
     payload = captured["json"]
     assert isinstance(payload, dict)
     assert payload["messages"][0]["role"] == "system"
-    assert "Thaana" in payload["messages"][0]["content"]
+    assert "never invent intelligence records" in payload["messages"][0]["content"]
     assert payload["messages"][1] == {"role": "user", "content": "How are you?"}
     assert "think" not in payload
     assert payload["options"]["num_predict"] == 1024
-    assert result["text"] == "ރަނގަޅު"
+    assert result["text"] == "Ready"
     assert result["model_revision"] == "sha256:test-digest"
+
+
+def test_bot_bridges_thaana_through_specialist_translation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_get(url: str, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"models": [{"name": "qwen3:4b", "digest": "sha256:qwen"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={"model": "qwen3:4b", "message": {"content": "The bot is ready."}},
+            request=httpx.Request("POST", url),
+        )
+
+    def fake_translate(task: DhivehiTask, _text: str) -> dict[str, str]:
+        if task is DhivehiTask.DHIVEHI_TO_ENGLISH:
+            return {"text": "Is the bot ready?", "model": "dv-en", "model_revision": "in"}
+        assert task is DhivehiTask.ENGLISH_TO_DHIVEHI
+        return {"text": "ބޮޓް ތައްޔާރު.", "model": "en-dv", "model_revision": "out"}
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    runtime = DhivehiModelRuntime(
+        DhivehiAISettings(cache_dir=tmp_path, embedding_cache_dir=tmp_path)
+    )
+    monkeypatch.setattr(runtime, "generate_text", fake_translate)
+
+    result = runtime.chat([{"role": "user", "content": "ބޮޓް ތައްޔާރުތޯ؟"}], "dhivehi")
+
+    payload = captured["json"]
+    assert isinstance(payload, dict)
+    assert payload["messages"][1]["content"] == "Is the bot ready?"
+    assert result["text"] == "ބޮޓް ތައްޔާރު."
+    assert result["model"] == "qwen3:4b + en-dv"
+    assert result["model_revision"] == "sha256:qwen+out"

@@ -224,11 +224,15 @@ class DhivehiModelRuntime:
             raise ModelUnavailableError(
                 f"local bot model {self.settings.bot_model} is not installed"
             )
-        language_instruction = {
-            "auto": "Reply in the language and script used by the user.",
-            "dhivehi": "Reply in Dhivehi using Thaana script.",
-            "english": "Reply in English.",
-        }[response_language]
+        wants_dhivehi = response_language == "dhivehi" or (
+            response_language == "auto" and self._contains_thaana(messages[-1]["content"])
+        )
+        bridged_messages = self._bridge_thaana_messages(messages)
+        language_instruction = (
+            "Reply in clear English; your final answer will be translated into Dhivehi."
+            if wants_dhivehi
+            else "Reply in English unless the user explicitly requests another language."
+        )
         system = (
             "You are EagleEye's Dhivehi intelligence assistant. Help with Dhivehi and English "
             "text, summaries, analysis and questions. Distinguish facts from inference, never "
@@ -241,7 +245,7 @@ class DhivehiModelRuntime:
                 f"{self.settings.bot_url.rstrip('/')}/api/chat",
                 json={
                     "model": self.settings.bot_model,
-                    "messages": [{"role": "system", "content": system}, *messages],
+                    "messages": [{"role": "system", "content": system}, *bridged_messages],
                     "stream": False,
                     "options": {
                         "temperature": 0.2,
@@ -258,14 +262,40 @@ class DhivehiModelRuntime:
                 raise ModelUnavailableError("local bot returned an empty response")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise ModelUnavailableError("local Qwen bot is unavailable") from exc
+        result_text = content.strip()
+        model_name = str(payload.get("model", self.settings.bot_model))
+        model_revision = self._bot_digest() or spec.revision
+        if wants_dhivehi:
+            translated = self.generate_text(DhivehiTask.ENGLISH_TO_DHIVEHI, result_text)
+            result_text = translated["text"]
+            model_name = f"{model_name} + {translated['model']}"
+            model_revision = f"{model_revision}+{translated['model_revision']}"
         return {
             "task": DhivehiTask.UNDERSTANDING.value,
-            "text": content.strip(),
-            "model": str(payload.get("model", self.settings.bot_model)),
-            "model_revision": self._bot_digest() or spec.revision,
+            "text": result_text,
+            "model": model_name,
+            "model_revision": model_revision,
             "quality_summary": spec.quality_summary,
-            "limitation": spec.limitation,
+            "limitation": (
+                spec.limitation
+                + (" Thaana replies use a specialist translation bridge." if wants_dhivehi else "")
+            ),
         }
+
+    def _bridge_thaana_messages(self, messages: list[BotMessage]) -> list[BotMessage]:
+        """Translate Thaana turns so the general model reasons over reliable English."""
+        bridged: list[BotMessage] = []
+        for message in messages:
+            content = message["content"]
+            if self._contains_thaana(content):
+                content = self.generate_text(DhivehiTask.DHIVEHI_TO_ENGLISH, content)["text"]
+            bridged.append({"role": message["role"], "content": content})
+        return bridged
+
+    @staticmethod
+    def _contains_thaana(text: str) -> bool:
+        """Return whether text includes a Unicode Thaana code point."""
+        return any("\u0780" <= character <= "\u07bf" for character in text)
 
     def _bot_digest(self) -> str | None:
         """Return the installed Ollama digest without downloading or guessing."""
