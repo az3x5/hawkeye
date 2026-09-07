@@ -146,6 +146,7 @@ class DhivehiAISettings(BaseSettings):
     torch_threads: int = Field(default=8, ge=1, le=16)
     max_input_tokens: int = Field(default=1024, ge=32, le=4096)
     max_new_tokens: int = Field(default=512, ge=16, le=2048)
+    bot_max_new_tokens: int = Field(default=1024, ge=64, le=4096)
     max_audio_seconds: int = Field(default=600, ge=1, le=3600)
     bot_url: str = "http://ollama:11434"
     bot_model: str = "qwen3:4b"
@@ -242,11 +243,10 @@ class DhivehiModelRuntime:
                     "model": self.settings.bot_model,
                     "messages": [{"role": "system", "content": system}, *messages],
                     "stream": False,
-                    "think": False,
                     "options": {
                         "temperature": 0.2,
                         "num_ctx": 4096,
-                        "num_predict": self.settings.max_new_tokens,
+                        "num_predict": self.settings.bot_max_new_tokens,
                     },
                 },
                 timeout=self.settings.bot_timeout_seconds,

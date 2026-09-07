@@ -72,5 +72,7 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
     assert payload["messages"][0]["role"] == "system"
     assert "Thaana" in payload["messages"][0]["content"]
     assert payload["messages"][1] == {"role": "user", "content": "How are you?"}
+    assert "think" not in payload
+    assert payload["options"]["num_predict"] == 1024
     assert result["text"] == "ރަނގަޅު"
     assert result["model_revision"] == "sha256:test-digest"
