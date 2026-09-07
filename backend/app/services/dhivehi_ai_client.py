@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
-from app.services.dhivehi_models import DhivehiTask
+from app.services.dhivehi_models import BotMessage, DhivehiTask
 
 
 class DhivehiAIServiceError(RuntimeError):
@@ -36,6 +36,19 @@ class DhivehiAIClient:
         """Run an explicit text-to-text model."""
         response = await self._request(
             "POST", "/v1/text", json={"task": task.value, "text": text}
+        )
+        return {str(key): str(value) for key, value in response.items()}
+
+    async def chat(
+        self,
+        messages: list[BotMessage],
+        response_language: Literal["auto", "dhivehi", "english"],
+    ) -> dict[str, str]:
+        """Generate one response from the private local conversational model."""
+        response = await self._request(
+            "POST",
+            "/v1/chat",
+            json={"messages": messages, "response_language": response_language},
         )
         return {str(key): str(value) for key, value in response.items()}
 

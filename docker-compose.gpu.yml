@@ -6,7 +6,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.gpu
       args:
-        BASE_IMAGE: ghcr.io/${GHCR_OWNER:-az3x5}/hawkeye-api:${HAWKEYE_TAG:-latest}
+        BASE_IMAGE: ${GPU_BASE_IMAGE:-hawkeye-api:dev}
     image: hawkeye-api:gpu
     environment:
       FACEID_SCRFD_PROVIDERS: '["CUDAExecutionProvider","CPUExecutionProvider"]'
@@ -32,3 +32,11 @@ services:
               count: 1
               capabilities: [gpu]
 
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

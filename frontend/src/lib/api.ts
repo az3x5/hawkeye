@@ -11,6 +11,8 @@ import type {
   Account,
   ApiErrorBody,
   AuditPage,
+  BotMessage,
+  BotResponseLanguage,
   Enrolment,
   FaceSample,
   Health,
@@ -175,6 +177,18 @@ export function inferDhivehiText(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, task }),
+  });
+}
+
+/** Generate one reply from the private local Dhivehi intelligence bot. */
+export function chatWithDhivehiBot(
+  messages: BotMessage[],
+  responseLanguage: BotResponseLanguage,
+): Promise<DhivehiInference> {
+  return request<DhivehiInference>("/api/v1/nlp/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, response_language: responseLanguage }),
   });
 }
 

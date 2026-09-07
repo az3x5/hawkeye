@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.api.v1.dependencies import (
     get_dhivehi_ai_client,
@@ -20,7 +20,7 @@ from app.domain.auth import Principal, Scope
 from app.domain.jobs import ProcessingState
 from app.domain.language import PrimaryScript, Script, TransliterationDirection
 from app.services.dhivehi_ai_client import DhivehiAIClient, DhivehiAIServiceError
-from app.services.dhivehi_models import DhivehiTask
+from app.services.dhivehi_models import BotMessage, DhivehiTask
 from app.services.language import NORMALIZER_VERSION, normalize_text, transliterate
 from app.services.language_search import (
     DocumentSubmission,
@@ -120,6 +120,29 @@ class NeuralInferenceResponse(BaseModel):
     model_revision: str
     quality_summary: str
     limitation: str
+
+
+class BotMessageRequest(BaseModel):
+    """One untrusted conversation turn accepted by the authenticated API."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4_000)
+
+
+class BotRequest(BaseModel):
+    """A bounded conversational request with an explicit response language."""
+
+    messages: list[BotMessageRequest] = Field(min_length=1, max_length=20)
+    response_language: Literal["auto", "dhivehi", "english"] = "auto"
+
+    @model_validator(mode="after")
+    def validate_conversation(self) -> BotRequest:
+        """Prevent unbounded prompt growth and assistant-only generation."""
+        if self.messages[-1].role != "user":
+            raise ValueError("the final chat message must have role user")
+        if sum(len(message.content) for message in self.messages) > 20_000:
+            raise ValueError("chat context exceeds 20,000 characters")
+        return self
 
 
 class ModelCapabilityResponse(BaseModel):
@@ -296,6 +319,28 @@ async def infer_text(
     """Run a pinned specialist model with explicit direction and provenance."""
     try:
         result = await client.text(DhivehiTask(body.task), body.text)
+    except DhivehiAIServiceError as exc:
+        raise DhivehiInferenceUnavailableError(str(exc)) from exc
+    return NeuralInferenceResponse.model_validate(result)
+
+
+@router.post(
+    "/chat",
+    response_model=NeuralInferenceResponse,
+    responses=_RESPONSES | {503: {"model": ErrorResponse}},
+    summary="Chat with the private local Dhivehi intelligence assistant",
+)
+async def chat(
+    body: BotRequest,
+    client: Annotated[DhivehiAIClient, Depends(get_dhivehi_ai_client)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+) -> NeuralInferenceResponse:
+    """Forward a bounded conversation while retaining the server-owned system prompt."""
+    messages: list[BotMessage] = [
+        {"role": message.role, "content": message.content} for message in body.messages
+    ]
+    try:
+        result = await client.chat(messages, body.response_language)
     except DhivehiAIServiceError as exc:
         raise DhivehiInferenceUnavailableError(str(exc)) from exc
     return NeuralInferenceResponse.model_validate(result)

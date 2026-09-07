@@ -154,6 +154,9 @@ services:
       DHIVEHI_AI_EMBEDDING_CACHE_DIR: /srv/language-model-cache/hub
       DHIVEHI_AI_DEVICE: ${DHIVEHI_AI_DEVICE:-cpu}
       DHIVEHI_AI_TORCH_THREADS: ${DHIVEHI_AI_TORCH_THREADS:-8}
+      DHIVEHI_AI_BOT_URL: http://ollama:11434
+      DHIVEHI_AI_BOT_MODEL: ${DHIVEHI_AI_BOT_MODEL:-qwen3:4b}
+      DHIVEHI_AI_BOT_TIMEOUT_SECONDS: ${DHIVEHI_AI_BOT_TIMEOUT_SECONDS:-300}
       HF_HOME: /srv/dhivehi-model-cache
     healthcheck:
       test:
@@ -169,6 +172,23 @@ services:
     volumes:
       - "dhivehi-model-cache:/srv/dhivehi-model-cache"
       - "language-model-cache-v2:/srv/language-model-cache:ro"
+    depends_on:
+      ollama: {condition: service_healthy}
+    networks: [faceid]
+
+  ollama:
+    image: ollama/ollama:0.33.3
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - "ollama-models:/root/.ollama"
     networks: [faceid]
 
   minio:
@@ -236,3 +256,4 @@ volumes:
   qdrant-data:
   language-model-cache-v2:
   dhivehi-model-cache:
+  ollama-models:

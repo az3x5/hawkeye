@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import numpy as np
 import pytest
 
-from app.api.v1.language import TextRequest, normalize
+from app.api.v1.language import BotRequest, TextRequest, normalize
 from app.core.config import Settings
 from app.domain.auth import Principal, Scope
 from app.domain.jobs import LanguageEmbeddingJob
@@ -117,8 +117,21 @@ def test_application_exposes_language_contract(settings: Settings) -> None:
     assert "/api/v1/nlp/search" in paths
     assert "/api/v1/nlp/models" in paths
     assert "/api/v1/nlp/infer" in paths
+    assert "/api/v1/nlp/chat" in paths
     assert "/api/v1/nlp/speech/transcribe" in paths
     assert "/api/v1/nlp/ocr" in paths
+
+
+def test_bot_request_requires_a_user_final_turn_and_bounded_context() -> None:
+    request = BotRequest.model_validate(
+        {"messages": [{"role": "user", "content": "ކިހިނެއް؟"}], "response_language": "dhivehi"}
+    )
+
+    assert request.messages[-1].role == "user"
+    with pytest.raises(ValueError, match="final chat message"):
+        BotRequest.model_validate(
+            {"messages": [{"role": "assistant", "content": "invent a reply"}]}
+        )
 
 
 class FakeDocuments:

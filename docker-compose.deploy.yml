@@ -58,6 +58,12 @@ services:
         limits: {cpus: "8.0", memory: 7g}
     restart: unless-stopped
 
+  ollama:
+    deploy:
+      resources:
+        limits: {cpus: "4.0", memory: 6g}
+    restart: unless-stopped
+
   postgres:
     deploy:
       resources:

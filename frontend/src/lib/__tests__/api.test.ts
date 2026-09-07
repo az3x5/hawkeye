@@ -8,6 +8,7 @@ vi.mock("next/headers", () => ({
 }));
 import {
   ApiError,
+  chatWithDhivehiBot,
   fetchIdentification,
   fetchReviewQueue,
   normalizeLanguageText,
@@ -87,6 +88,19 @@ describe("submitReview", () => {
 });
 
 describe("language API", () => {
+  it("posts bounded bot history and an explicit response language", async () => {
+    const fetchMock = mockFetch(200, { task: "understanding", text: "ރަނގަޅު" });
+
+    await chatWithDhivehiBot([{ role: "user", content: "How are you?" }], "dhivehi");
+
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toContain("/api/v1/nlp/chat");
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({
+      messages: [{ role: "user", content: "How are you?" }],
+      response_language: "dhivehi",
+    });
+  });
+
   it("posts text for normalization without caching", async () => {
     const fetchMock = mockFetch(200, { normalized: "ދިވެހި" });
 

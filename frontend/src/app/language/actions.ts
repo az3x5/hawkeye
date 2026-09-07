@@ -2,6 +2,7 @@
 
 import {
   ApiError,
+  chatWithDhivehiBot,
   createLanguageDocument,
   inferDhivehiText,
   NotAuthenticatedError,
@@ -10,6 +11,8 @@ import {
   transliterateLanguageText,
 } from "@/lib/api";
 import type {
+  BotMessage,
+  BotResponseLanguage,
   LanguageNormalization,
   LanguageDocument,
   LanguageSearchResponse,
@@ -32,6 +35,8 @@ export type TransliterateActionResult =
 export type NeuralInferenceActionResult =
   | { ok: true; inference: DhivehiInference }
   | Failure;
+
+export type BotActionResult = { ok: true; inference: DhivehiInference } | Failure;
 
 export type CreateDocumentActionResult =
   | { ok: true; document: LanguageDocument }
@@ -75,6 +80,32 @@ export async function neuralInferenceAction(
   if (invalid !== null) return invalid;
   try {
     return { ok: true, inference: await inferDhivehiText(text, task) };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function botAction(
+  messages: BotMessage[],
+  responseLanguage: BotResponseLanguage,
+): Promise<BotActionResult> {
+  if (messages.length === 0 || messages.length > 20) {
+    return { ok: false, code: "invalid_chat", message: "Chat must contain 1 to 20 messages." };
+  }
+  if (messages.at(-1)?.role !== "user") {
+    return { ok: false, code: "invalid_chat", message: "Enter a message first." };
+  }
+  if (
+    messages.some((message) => message.content.trim() === "" || message.content.length > 4_000) ||
+    messages.reduce((total, message) => total + message.content.length, 0) > 20_000
+  ) {
+    return { ok: false, code: "invalid_chat", message: "The conversation is too long." };
+  }
+  try {
+    return {
+      ok: true,
+      inference: await chatWithDhivehiBot(messages, responseLanguage),
+    };
   } catch (error) {
     return failure(error);
   }

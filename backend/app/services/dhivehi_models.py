@@ -14,8 +14,9 @@ import threading
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
+import httpx
 import numpy as np
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -120,13 +121,16 @@ MODEL_REGISTRY: dict[DhivehiTask, ModelSpec] = {
     ),
     DhivehiTask.UNDERSTANDING: ModelSpec(
         DhivehiTask.UNDERSTANDING,
-        "naturecodeproject/dhivehi",
-        "unavailable-without-access",
-        "gated",
-        "causal-lm",
-        status="blocked",
-        quality_summary="Dhivehi Qwen3-8B model card claims instruction and mixed-script support.",
-        limitation="Manual Hugging Face approval is required and no token is installed.",
+        "qwen3:4b",
+        "ollama-library-qwen3-4b",
+        "apache-2.0",
+        "ollama",
+        quality_summary=(
+            "Public Qwen3 4B instruction model with multilingual conversational support."
+        ),
+        limitation=(
+            "Not independently evaluated for Dhivehi; verify names, dates and consequential claims."
+        ),
     ),
 }
 
@@ -143,6 +147,16 @@ class DhivehiAISettings(BaseSettings):
     max_input_tokens: int = Field(default=1024, ge=32, le=4096)
     max_new_tokens: int = Field(default=512, ge=16, le=2048)
     max_audio_seconds: int = Field(default=600, ge=1, le=3600)
+    bot_url: str = "http://ollama:11434"
+    bot_model: str = "qwen3:4b"
+    bot_timeout_seconds: float = Field(default=300.0, ge=1.0, le=1800.0)
+
+
+class BotMessage(TypedDict):
+    """One validated conversational turn passed to the local model."""
+
+    role: Literal["user", "assistant"]
+    content: str
 
 
 class ModelUnavailableError(RuntimeError):
@@ -172,7 +186,12 @@ class DhivehiModelRuntime:
         rows: list[dict[str, object]] = []
         for task, spec in MODEL_REGISTRY.items():
             row = spec.public_dict()
-            if spec.status == "blocked":
+            if task is DhivehiTask.UNDERSTANDING:
+                digest = self._bot_digest()
+                row["status"] = "installed" if digest else "not_installed"
+                if digest:
+                    row["revision"] = digest
+            elif spec.status == "blocked":
                 row["status"] = "blocked"
             else:
                 row["status"] = "installed" if self._artifact_installed(task) else "not_installed"
@@ -182,6 +201,8 @@ class DhivehiModelRuntime:
 
     def _artifact_installed(self, task: DhivehiTask) -> bool:
         """Check the immutable snapshot rather than assuming a download succeeded."""
+        if task is DhivehiTask.UNDERSTANDING:
+            return self._bot_digest() is not None
         spec = MODEL_REGISTRY[task]
         root = (
             self.settings.embedding_cache_dir
@@ -190,6 +211,81 @@ class DhivehiModelRuntime:
         )
         repository = "models--" + spec.model_id.replace("/", "--")
         return (root / repository / "snapshots" / spec.revision).is_dir()
+
+    def chat(
+        self,
+        messages: list[BotMessage],
+        response_language: Literal["auto", "dhivehi", "english"] = "auto",
+    ) -> dict[str, str]:
+        """Generate one bounded bot reply through the private Ollama service."""
+        spec = MODEL_REGISTRY[DhivehiTask.UNDERSTANDING]
+        if not self._artifact_installed(DhivehiTask.UNDERSTANDING):
+            raise ModelUnavailableError(
+                f"local bot model {self.settings.bot_model} is not installed"
+            )
+        language_instruction = {
+            "auto": "Reply in the language and script used by the user.",
+            "dhivehi": "Reply in Dhivehi using Thaana script.",
+            "english": "Reply in English.",
+        }[response_language]
+        system = (
+            "You are EagleEye's Dhivehi intelligence assistant. Help with Dhivehi and English "
+            "text, summaries, analysis and questions. Distinguish facts from inference, never "
+            "invent intelligence records or claim access to data not included in the conversation, "
+            "and say when evidence is insufficient. "
+            + language_instruction
+        )
+        try:
+            response = httpx.post(
+                f"{self.settings.bot_url.rstrip('/')}/api/chat",
+                json={
+                    "model": self.settings.bot_model,
+                    "messages": [{"role": "system", "content": system}, *messages],
+                    "stream": False,
+                    "think": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "num_ctx": 4096,
+                        "num_predict": self.settings.max_new_tokens,
+                    },
+                },
+                timeout=self.settings.bot_timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = payload.get("message", {}).get("content", "")
+            if not isinstance(content, str) or not content.strip():
+                raise ModelUnavailableError("local bot returned an empty response")
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise ModelUnavailableError("local Qwen bot is unavailable") from exc
+        return {
+            "task": DhivehiTask.UNDERSTANDING.value,
+            "text": content.strip(),
+            "model": str(payload.get("model", self.settings.bot_model)),
+            "model_revision": self._bot_digest() or spec.revision,
+            "quality_summary": spec.quality_summary,
+            "limitation": spec.limitation,
+        }
+
+    def _bot_digest(self) -> str | None:
+        """Return the installed Ollama digest without downloading or guessing."""
+        try:
+            response = httpx.get(
+                f"{self.settings.bot_url.rstrip('/')}/api/tags",
+                timeout=min(self.settings.bot_timeout_seconds, 5.0),
+            )
+            response.raise_for_status()
+            models = response.json().get("models", [])
+        except (httpx.HTTPError, ValueError, TypeError):
+            return None
+        for model in models if isinstance(models, list) else []:
+            if not isinstance(model, dict):
+                continue
+            name = model.get("name", model.get("model"))
+            if name == self.settings.bot_model or name == f"{self.settings.bot_model}:latest":
+                digest = model.get("digest")
+                return str(digest) if digest else self.settings.bot_model
+        return None
 
     def generate_text(self, task: DhivehiTask, text: str) -> dict[str, str]:
         """Run translation or transliteration under one serialized model lease."""

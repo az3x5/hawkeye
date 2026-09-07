@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.services.dhivehi_models import (
+    BotMessage,
     DhivehiAISettings,
     DhivehiModelRuntime,
     DhivehiTask,
@@ -21,6 +22,29 @@ class TextInferenceRequest(BaseModel):
 
     task: DhivehiTask
     text: str = Field(min_length=1, max_length=20_000)
+
+
+class ChatMessageRequest(BaseModel):
+    """One user-visible conversation turn; system prompts remain server-owned."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4_000)
+
+
+class ChatInferenceRequest(BaseModel):
+    """A bounded conversation submitted to the private local bot."""
+
+    messages: list[ChatMessageRequest] = Field(min_length=1, max_length=20)
+    response_language: Literal["auto", "dhivehi", "english"] = "auto"
+
+    @model_validator(mode="after")
+    def validate_conversation(self) -> ChatInferenceRequest:
+        """Reject excessive context and require a user to own the final turn."""
+        if self.messages[-1].role != "user":
+            raise ValueError("the final chat message must have role user")
+        if sum(len(message.content) for message in self.messages) > 20_000:
+            raise ValueError("chat context exceeds 20,000 characters")
+        return self
 
 
 @lru_cache(maxsize=1)
@@ -49,6 +73,16 @@ def create_dhivehi_ai_app() -> FastAPI:
     def text_inference(body: TextInferenceRequest) -> dict[str, str]:
         try:
             return get_runtime().generate_text(body.task, body.text)
+        except (ValueError, ModelUnavailableError) as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+    @app.post("/v1/chat")
+    def chat_inference(body: ChatInferenceRequest) -> dict[str, str]:
+        try:
+            messages: list[BotMessage] = [
+                {"role": message.role, "content": message.content} for message in body.messages
+            ]
+            return get_runtime().chat(messages, body.response_language)
         except (ValueError, ModelUnavailableError) as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 

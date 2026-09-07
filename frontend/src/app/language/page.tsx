@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { LanguageWorkspace } from "@/app/language/language-workspace";
+import { LanguageBot } from "@/app/language/language-bot";
 import { MediaLanguageTools } from "@/app/language/media-language-tools";
 import { ModelStatus } from "@/app/language/model-status";
 import { SemanticSearch } from "@/app/language/semantic-search";
@@ -24,6 +25,7 @@ export default async function LanguagePage() {
       />
       {identity.scopes.includes("language") ? (
         <>
+          <LanguageBot />
           <LanguageWorkspace />
           <MediaLanguageTools />
           <ModelStatus models={models.capabilities} />

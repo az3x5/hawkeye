@@ -277,6 +277,14 @@ export interface DhivehiInference {
   limitation: string;
 }
 
+export type BotRole = "user" | "assistant";
+export type BotResponseLanguage = "auto" | "dhivehi" | "english";
+
+export interface BotMessage {
+  role: BotRole;
+  content: string;
+}
+
 export interface DhivehiModelCapability {
   task: string;
   model_id: string;
