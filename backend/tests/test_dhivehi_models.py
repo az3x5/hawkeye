@@ -29,7 +29,7 @@ def test_understanding_model_uses_public_resource_sized_runtime() -> None:
     model = MODEL_REGISTRY[DhivehiTask.UNDERSTANDING]
 
     assert model.status == "available"
-    assert model.model_id == "qwen3:4b"
+    assert model.model_id == "qwen3:4b-instruct"
     assert model.runtime == "ollama"
     assert model.license == "apache-2.0"
 
@@ -48,7 +48,9 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
     def fake_get(url: str, **_kwargs: object) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"models": [{"name": "qwen3:4b", "digest": "sha256:test-digest"}]},
+            json={
+                "models": [{"name": "qwen3:4b-instruct", "digest": "sha256:test-digest"}]
+            },
             request=httpx.Request("GET", url),
         )
 
@@ -56,7 +58,7 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
         captured.update(kwargs)
         return httpx.Response(
             200,
-            json={"model": "qwen3:4b", "message": {"content": "Ready"}},
+            json={"model": "qwen3:4b-instruct", "message": {"content": "Ready"}},
             request=httpx.Request("POST", url),
         )
 
@@ -86,7 +88,7 @@ def test_bot_bridges_thaana_through_specialist_translation(
     def fake_get(url: str, **_kwargs: object) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"models": [{"name": "qwen3:4b", "digest": "sha256:qwen"}]},
+            json={"models": [{"name": "qwen3:4b-instruct", "digest": "sha256:qwen"}]},
             request=httpx.Request("GET", url),
         )
 
@@ -94,7 +96,10 @@ def test_bot_bridges_thaana_through_specialist_translation(
         captured.update(kwargs)
         return httpx.Response(
             200,
-            json={"model": "qwen3:4b", "message": {"content": "The bot is ready."}},
+            json={
+                "model": "qwen3:4b-instruct",
+                "message": {"content": "The bot is ready."},
+            },
             request=httpx.Request("POST", url),
         )
 
@@ -117,5 +122,5 @@ def test_bot_bridges_thaana_through_specialist_translation(
     assert isinstance(payload, dict)
     assert payload["messages"][1]["content"] == "Is the bot ready?"
     assert result["text"] == "ބޮޓް ތައްޔާރު."
-    assert result["model"] == "qwen3:4b + en-dv"
+    assert result["model"] == "qwen3:4b-instruct + en-dv"
     assert result["model_revision"] == "sha256:qwen+out"

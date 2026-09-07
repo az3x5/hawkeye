@@ -121,8 +121,8 @@ MODEL_REGISTRY: dict[DhivehiTask, ModelSpec] = {
     ),
     DhivehiTask.UNDERSTANDING: ModelSpec(
         DhivehiTask.UNDERSTANDING,
-        "qwen3:4b",
-        "ollama-library-qwen3-4b",
+        "qwen3:4b-instruct",
+        "ollama-library-qwen3-4b-instruct",
         "apache-2.0",
         "ollama",
         quality_summary=(
@@ -149,7 +149,7 @@ class DhivehiAISettings(BaseSettings):
     bot_max_new_tokens: int = Field(default=1024, ge=64, le=4096)
     max_audio_seconds: int = Field(default=600, ge=1, le=3600)
     bot_url: str = "http://ollama:11434"
-    bot_model: str = "qwen3:4b"
+    bot_model: str = "qwen3:4b-instruct"
     bot_timeout_seconds: float = Field(default=300.0, ge=1.0, le=1800.0)
 
 
