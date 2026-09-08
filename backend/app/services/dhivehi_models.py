@@ -146,7 +146,7 @@ class DhivehiAISettings(BaseSettings):
     torch_threads: int = Field(default=8, ge=1, le=16)
     max_input_tokens: int = Field(default=1024, ge=32, le=4096)
     max_new_tokens: int = Field(default=512, ge=16, le=2048)
-    bot_max_new_tokens: int = Field(default=1024, ge=64, le=4096)
+    bot_max_new_tokens: int = Field(default=256, ge=64, le=1024)
     max_audio_seconds: int = Field(default=600, ge=1, le=3600)
     bot_url: str = "http://ollama:11434"
     bot_model: str = "qwen3:4b-instruct"
@@ -235,9 +235,11 @@ class DhivehiModelRuntime:
         )
         system = (
             "You are EagleEye's Dhivehi intelligence assistant. Help with Dhivehi and English "
-            "text, summaries, analysis and questions. Distinguish facts from inference, never "
-            "invent intelligence records or claim access to data not included in the conversation, "
-            "and say when evidence is insufficient. "
+            "text, summaries, analysis and questions. Answer directly in at most three short "
+            "sentences unless the user explicitly requests detail. Never restate the question. "
+            "If a term is unclear, ask one short clarification question. Distinguish facts from "
+            "inference, never invent intelligence records or claim access to data not included in "
+            "the conversation, and say when evidence is insufficient. "
             + language_instruction
         )
         try:
