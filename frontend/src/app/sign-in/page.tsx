@@ -34,6 +34,9 @@ export default async function SignInPage({
       if (caught instanceof ApiError && caught.status === 429) {
         redirect("/sign-in?error=throttled");
       }
+      if (!(caught instanceof ApiError) || caught.status >= 500) {
+        redirect("/sign-in?error=unavailable");
+      }
       redirect("/sign-in?error=rejected");
     }
 
@@ -47,6 +50,8 @@ export default async function SignInPage({
       ? "Enter your email and password."
       : error === "throttled"
         ? "Too many attempts. Wait a minute and try again."
+        : error === "unavailable"
+          ? "The sign-in service is unavailable. Try again shortly."
         : error === "rejected"
           ? "Email or password is incorrect."
           : null;

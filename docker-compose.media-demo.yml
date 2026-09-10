@@ -1,0 +1,28 @@
+services:
+  media-demo:
+    build: ./ops/media-demo
+    image: eagleeye-media-web:demo
+    cpus: 4
+    mem_limit: 4g
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    environment:
+      DEMO_API_URL: http://api:8000
+    volumes:
+      - /home/newbie/eagleeye-media-demo/results:/results
+      - eagleeye-media-demo-cache:/cache
+    ports: ["100.74.113.94:8020:8020"]
+    networks: [faceid]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8020/health').raise_for_status()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  frontend:
+    environment:
+      FACEID_MEDIA_DEMO_URL: http://media-demo:8020
+volumes:
+  eagleeye-media-demo-cache:
+    external: true
