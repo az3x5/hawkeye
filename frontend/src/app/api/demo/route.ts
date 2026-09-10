@@ -8,8 +8,13 @@ async function forward(request: Request) {
   if (!token) return Response.json({ detail: "Sign in to continue." }, { status: 401 });
   const base = process.env.FACEID_MEDIA_DEMO_URL;
   if (!base) return Response.json({ detail: "Media demonstration service is not configured." }, { status: 503 });
-  if (request.method === "POST" && request.headers.get("origin") !== new URL(request.url).origin) {
-    return Response.json({ detail: "Submit from this application." }, { status: 403 });
+  if (request.method === "POST") {
+    let sameHost = false;
+    try {
+      const origin = new URL(request.headers.get("origin") ?? "");
+      sameHost = ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.get("host");
+    } catch { /* A missing or malformed Origin is not an application submission. */ }
+    if (!sameHost) return Response.json({ detail: "Submit from this application." }, { status: 403 });
   }
   let body: Uint8Array<ArrayBuffer> | undefined;
   if (request.method === "POST") {

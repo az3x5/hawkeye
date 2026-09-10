@@ -1,0 +1,5 @@
+services:
+  uploader:
+    environment:
+      FACEID_API_URL: http://100.74.113.94:8000
+      FACEID_MEDIA_DEMO_URL: http://100.74.113.94:8020
