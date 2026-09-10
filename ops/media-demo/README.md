@@ -33,3 +33,11 @@ deploy and GPU overlays. The media service reuses installed model caches, requir
 language authorization, and publishes only on the cyber-ai Tailscale address at 8020.
 Local frontend: set `FACEID_API_URL=http://100.74.113.94:8000` and
 `FACEID_MEDIA_DEMO_URL=http://100.74.113.94:8020`.
+# Additional vision models
+
+Run `python /demo/install_vision.py` once against the persistent `/cache`
+volume. It installs pinned RT-DETR object detection, SigLIP2 image embeddings,
+and SAM2-small segmentation artifacts and writes `vision-models.json` as the
+deployment receipt. The image includes Supervision's ByteTrack implementation;
+tracking integration must preserve evidence timestamps and stable per-session
+IDs rather than treating a track as a confirmed identity.
