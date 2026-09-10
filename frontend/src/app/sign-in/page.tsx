@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /**
  * Sign-in.
  *
- * The password is exchanged for a short-lived session credential server-side;
+ * The username and password are exchanged for a short-lived session credential server-side;
  * the credential is kept in an httpOnly cookie and the password itself never
  * reaches the browser's storage or this app's logs.
  */
@@ -21,13 +21,13 @@ export default async function SignInPage({
 
   async function submit(formData: FormData) {
     "use server";
-    const email = String(formData.get("email") ?? "").trim();
+    const username = String(formData.get("username") ?? "").trim();
     const password = String(formData.get("password") ?? "");
-    if (email === "" || password === "") redirect("/sign-in?error=missing");
+    if (username === "" || password === "") redirect("/sign-in?error=missing");
 
     let token: string;
     try {
-      ({ token } = await signIn(email, password));
+      ({ token } = await signIn(username, password));
     } catch (caught) {
       // Deliberately one message for every failure: which half was wrong is
       // not something an unauthenticated caller has earned.
@@ -47,13 +47,13 @@ export default async function SignInPage({
 
   const message =
     error === "missing"
-      ? "Enter your email and password."
+      ? "Enter your username and password."
       : error === "throttled"
         ? "Too many attempts. Wait a minute and try again."
         : error === "unavailable"
           ? "The sign-in service is unavailable. Try again shortly."
         : error === "rejected"
-          ? "Email or password is incorrect."
+          ? "Username or password is incorrect."
           : null;
 
   const field =
@@ -76,12 +76,12 @@ export default async function SignInPage({
 
       <form className="panel space-y-3 p-4" action={submit}>
         <label className="block space-y-1.5 text-sm text-ink-muted">
-          Email
+          Username
           <input
-            type="email"
-            name="email"
+            type="text"
+            name="username"
             autoComplete="username"
-            placeholder="you@example.com"
+            placeholder="newbie"
             className={field}
             autoFocus
             required

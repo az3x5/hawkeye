@@ -248,15 +248,16 @@ export function submitReview(
 }
 
 /**
- * Exchange an email and password for a session credential.
+ * Exchange a username and password for a session credential.
  *
  * Called from the sign-in server action, which is the only place without a
  * session yet, so it bypasses the usual token-attaching request helper.
  */
 export async function signIn(
-  email: string,
+  username: string,
   password: string,
 ): Promise<{ token: string; subject: string }> {
+  const email = accountIdentifier(username);
   const response = await fetch(`${apiBaseUrl()}/api/v1/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -271,6 +272,12 @@ export async function signIn(
     throw new ApiError(response.status, "unexpected_error", `HTTP ${response.status}`);
   }
   return (await response.json()) as { token: string; subject: string };
+}
+
+/** Map a simple operator username to the email-shaped account key used by the API. */
+export function accountIdentifier(username: string): string {
+  const value = username.trim().toLowerCase();
+  return value.includes("@") ? value : `${value}@eagleeye.internal`;
 }
 
 /** Revoke the current session server-side, so signing out really ends it. */

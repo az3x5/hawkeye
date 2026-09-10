@@ -7,6 +7,7 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => ({ value: "faceid_test-token" }) }),
 }));
 import {
+  accountIdentifier,
   ApiError,
   chatWithDhivehiBot,
   fetchIdentification,
@@ -218,6 +219,14 @@ describe("proxy allowlist", () => {
 });
 
 describe("authentication", () => {
+  it("maps the demo username to the API account identifier", () => {
+    expect(accountIdentifier(" Newbie ")).toBe("newbie@eagleeye.internal");
+  });
+
+  it("keeps existing email account identifiers usable", () => {
+    expect(accountIdentifier("Admin@Admin.com")).toBe("admin@admin.com");
+  });
+
   it("sends the reviewer's own token, not a shared credential", async () => {
     const fetchMock = mockFetch(200, { items: [], count: 0 });
     await fetchReviewQueue();
