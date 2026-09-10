@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ApiError, signIn } from "@/lib/api";
+import { ApiError, fetchIdentity, signIn } from "@/lib/api";
 import { SESSION_COOKIE, cookieOptions } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,9 @@ export default async function SignInPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  const identity = await fetchIdentity().catch(() => null);
+  if (identity !== null) redirect("/dashboard");
+
   const { error } = await searchParams;
 
   async function submit(formData: FormData) {
@@ -60,7 +63,7 @@ export default async function SignInPage({
     "w-full rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm text-ink";
 
   return (
-    <div className="mx-auto max-w-md space-y-4 py-10">
+    <div className="space-y-4">
       <div>
         <h1 className="text-lg font-semibold tracking-tight text-ink">Sign in</h1>
         <p className="mt-1 text-sm text-ink-muted">
@@ -105,9 +108,8 @@ export default async function SignInPage({
         </button>
       </form>
 
-      <p className="rounded-md border-l-2 border-line-strong bg-surface-raised px-3 py-2 text-sm text-ink-muted">
-        Accounts are created by an operator with{" "}
-        <span className="identifier">python -m app.users create</span>.
+      <p className="text-center text-xs text-ink-faint">
+        Access is restricted to authorized operators. Contact an administrator for an account.
       </p>
     </div>
   );

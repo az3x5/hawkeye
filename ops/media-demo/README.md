@@ -1,6 +1,6 @@
 # Small-dataset demonstration
 
-The Language page now contains the media demonstration console. It uses the signed-in
+The Vision page contains the media demonstration console. It uses the signed-in
 user's existing credential; every job is scoped to that subject. Backend processing is
 serialized, survives page refreshes, and preserves results in the dedicated demo SQLite
 database. Interrupted jobs are marked failed at service restart.

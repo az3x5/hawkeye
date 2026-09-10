@@ -4,6 +4,7 @@ import os
 import sqlite3
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,9 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 ROOT = Path(os.environ.get("DEMO_DATA", "/results"))
 POOL = ThreadPoolExecutor(max_workers=1)
 LOCK = threading.Lock()
+CAPABILITY_LOCK = threading.Lock()
+CAPABILITY_CACHE: tuple[float, dict] = (0.0, {})
+VISION_MODEL = "qwen3-vl:4b-instruct"
 
 
 def db():
@@ -60,6 +64,66 @@ def public(row):
     return value
 
 
+def capabilities():
+    """Report artifacts visible to this running service, with a short probe cache."""
+    global CAPABILITY_CACHE
+    now = time.monotonic()
+    with CAPABILITY_LOCK:
+        if now - CAPABILITY_CACHE[0] < 15 and CAPABILITY_CACHE[1]:
+            return CAPABILITY_CACHE[1]
+
+        models = []
+        vision_receipt = Path("/cache/vision-models.json")
+        if vision_receipt.exists():
+            try:
+                for model in json.loads(vision_receipt.read_text(encoding="utf-8")):
+                    models.append({
+                        "task": model["task"],
+                        "model": model["model"],
+                        "revision": model["revision"],
+                        "state": "ready" if Path(model["path"]).exists() else "missing",
+                    })
+            except (KeyError, OSError, json.JSONDecodeError, TypeError):
+                models.append({"task": "specialist_vision", "model": "receipt", "state": "error"})
+
+        speech_receipt = Path("/cache/speech-model.json")
+        if speech_receipt.exists():
+            try:
+                speech = json.loads(speech_receipt.read_text(encoding="utf-8"))
+                models.append({
+                    "task": "english_speech",
+                    "model": speech["model"],
+                    "revision": speech["revision"],
+                    "state": "ready" if Path(speech["path"]).exists() else "missing",
+                })
+            except (KeyError, OSError, json.JSONDecodeError, TypeError):
+                models.append({"task": "english_speech", "model": "receipt", "state": "error"})
+
+        try:
+            response = httpx.get("http://ollama:11434/api/tags", timeout=3)
+            response.raise_for_status()
+            installed = response.json().get("models", [])
+            match = next((item for item in installed if item.get("name") == VISION_MODEL), None)
+            models.insert(0, {
+                "task": "visual_understanding",
+                "model": VISION_MODEL,
+                "revision": match.get("digest") if match else None,
+                "state": "ready" if match else "missing",
+            })
+        except (httpx.HTTPError, ValueError, TypeError):
+            models.insert(0, {"task": "visual_understanding", "model": VISION_MODEL, "state": "unavailable"})
+
+        result = {
+            "status": "ready" if any(model["state"] == "ready" for model in models) else "degraded",
+            "models": models,
+            "limits": {"max_upload_mb": 20, "video_window_seconds": 60, "video_sampled_frames": 3},
+            "tracking": {"installed": any(model.get("task") == "object_detection" and model["state"] == "ready" for model in models), "connected": False},
+            "checked_at": time.time(),
+        }
+        CAPABILITY_CACHE = (now, result)
+        return result
+
+
 def execute(job, kind, path, language, script):
     with db() as con:
         con.execute("UPDATE jobs SET state='running' WHERE id=?", (job,))
@@ -84,7 +148,8 @@ def health():
 @app.get("/jobs")
 def jobs(owner=Depends(identity)):
     with db() as con:
-        return {"jobs": [public(row) for row in con.execute("SELECT * FROM jobs WHERE owner=? ORDER BY created DESC,rowid DESC LIMIT 30", (owner,))]}
+        rows = [public(row) for row in con.execute("SELECT * FROM jobs WHERE owner=? ORDER BY created DESC,rowid DESC LIMIT 30", (owner,))]
+    return {"jobs": rows, "service": capabilities()}
 
 
 @app.get("/jobs/{job_id}")

@@ -76,6 +76,12 @@ export const CAPABILITIES: Record<CapabilityKey, Capability> = {
     missing: [],
     note: "Every identification can be listed and filtered.",
   },
+  vision: {
+    state: "partial",
+    supported: ["GET/POST /media-demo/jobs", "Qwen vision and bounded media analysis"],
+    missing: ["continuous object tracking and identity association"],
+    note: "Uploaded media analysis is live. Installed specialist models are reported by the running service; continuous tracking is not yet connected.",
+  },
   language: {
     state: "available",
     supported: ["POST /nlp/normalize", "POST /nlp/transliterate"],
@@ -108,6 +114,7 @@ export type CapabilityKey =
   | "review"
   | "persons"
   | "matches"
+  | "vision"
   | "language"
   | "audit"
   | "settings";

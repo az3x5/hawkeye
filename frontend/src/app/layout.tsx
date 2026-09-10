@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ApplicationShell } from "@/components/shell/application-shell";
 import { Header } from "@/components/shell/header";
 import { Sidebar } from "@/components/shell/sidebar";
 import "./globals.css";
@@ -15,15 +16,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen bg-bg text-ink antialiased">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Header />
-            <main className="mx-auto w-full max-w-[100rem] flex-1 p-4 lg:p-6">
-              {children}
-            </main>
-          </div>
-        </div>
+        <ApplicationShell header={<Header />} sidebar={<Sidebar />}>
+          {children}
+        </ApplicationShell>
       </body>
     </html>
   );

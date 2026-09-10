@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { LanguageWorkspace } from "@/app/language/language-workspace";
 import { LanguageBot } from "@/app/language/language-bot";
 import { MediaLanguageTools } from "@/app/language/media-language-tools";
-import { MediaDemo } from "@/app/language/media-demo";
 import { ModelStatus } from "@/app/language/model-status";
 import { SemanticSearch } from "@/app/language/semantic-search";
 import { PageHeader } from "@/components/shell/page-header";
@@ -26,7 +25,6 @@ export default async function LanguagePage() {
       />
       {identity.scopes.includes("language") ? (
         <>
-          <MediaDemo />
           <LanguageBot />
           <LanguageWorkspace />
           <MediaLanguageTools />
