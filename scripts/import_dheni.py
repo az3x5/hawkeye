@@ -3,8 +3,9 @@
 
 The input CSV must contain ``id`` and ``local_id``. Dheni's image API uses
 ``local_id`` as its ``personId`` path parameter; Hawkeye stores both values as
-scoped external identifiers. The source API key is sent only to the metadata
-endpoint. The returned signed URL is downloaded without credentials.
+scoped external identifiers. Production uses OAuth client credentials and the
+IIMS MinIO photo API. The legacy API-key/signed-URL source remains available
+for resumability during migration.
 
 Every completed photo is committed to a local SQLite checkpoint keyed by
 ``(id, photoId)``. Successful photos are skipped on subsequent runs, so
@@ -21,6 +22,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -68,6 +70,166 @@ class ImportResult:
     detail: str = ""
 
 
+class OAuthTokenProvider:
+    """Thread-safe, expiry-aware OAuth client-credentials token cache."""
+
+    def __init__(
+        self,
+        token_url: str,
+        client_id: str,
+        client_secret: str,
+        scope: str,
+        audience: str,
+    ) -> None:
+        self.token_url = token_url
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scope = scope
+        self.audience = audience
+        self._token = ""
+        self._refresh_at = 0.0
+        self._lock = threading.Lock()
+
+    def authorization(self, *, force_refresh: bool = False) -> str:
+        """Return a cached Bearer header, refreshing once near expiry."""
+        with self._lock:
+            if not force_refresh and self._token and time.monotonic() < self._refresh_at:
+                return f"Bearer {self._token}"
+
+            fields = {
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            }
+            if self.scope:
+                fields["scope"] = self.scope
+            if self.audience:
+                fields["audience"] = self.audience
+            request = urllib.request.Request(
+                self.token_url,
+                data=urllib.parse.urlencode(fields).encode(),
+                headers={"Accept": "application/json"},
+                method="POST",
+            )
+            with _open_with_retry(request) as response:
+                try:
+                    payload = json.loads(response.read())
+                    token = payload["access_token"]
+                    token_type = payload.get("token_type", "Bearer")
+                    expires_in = float(payload.get("expires_in", 900))
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                    raise DheniError(502, "OAuth token response has an unexpected shape") from None
+            if not isinstance(token, str) or not token or str(token_type).lower() != "bearer":
+                raise DheniError(502, "OAuth token response has no usable Bearer token")
+
+            self._token = token
+            # The service documents 15-minute tokens. Refresh one minute early,
+            # or halfway through unusually short-lived test tokens.
+            safety_margin = min(60.0, max(1.0, expires_in / 2))
+            self._refresh_at = time.monotonic() + max(1.0, expires_in - safety_margin)
+            return f"Bearer {self._token}"
+
+
+class LegacyPhotoSource:
+    """Adapter for the original API-key and signed-image API."""
+
+    def __init__(self, api_url: str, api_key: str) -> None:
+        self.api_url = api_url
+        self.api_key = api_key
+
+    def list_photos(self, person_id: str) -> list[dict[str, object]]:
+        return _list_legacy_photos(self.api_url, self.api_key, person_id)
+
+    def download_photo(
+        self, person_id: str, image: dict[str, object], max_image_bytes: int
+    ) -> tuple[bytes, str, str]:
+        del person_id
+        return _download_legacy_photo(
+            image, dheni_api=self.api_url, max_image_bytes=max_image_bytes
+        )
+
+
+class OAuthPhotoSource:
+    """Adapter for the IIMS OAuth-backed person-photo API."""
+
+    def __init__(self, api_url: str, tokens: OAuthTokenProvider) -> None:
+        self.api_url = api_url.rstrip("/")
+        self.tokens = tokens
+
+    def _open(self, url: str, *, accept: str):
+        for auth_attempt in range(2):
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": self.tokens.authorization(
+                        force_refresh=auth_attempt == 1
+                    ),
+                    "Accept": accept,
+                },
+                method="GET",
+            )
+            try:
+                return _open_with_retry(request)
+            except DheniError as error:
+                if error.status != 401 or auth_attempt == 1:
+                    raise
+        raise DheniError(401, "OAuth token was rejected")
+
+    def list_photos(self, person_id: str) -> list[dict[str, object]]:
+        encoded = urllib.parse.quote(person_id, safe="")
+        url = f"{self.api_url}/v2/person/{encoded}/photos?format=metadata"
+        with self._open(url, accept="application/json") as response:
+            try:
+                payload = json.loads(response.read())
+                photos = payload["photos"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                raise DheniError(502, "photo-list response has an unexpected shape") from None
+        if not isinstance(photos, list):
+            raise DheniError(502, "photo-list response has no photos array")
+
+        normalized: list[dict[str, object]] = []
+        for photo in photos:
+            if (
+                not isinstance(photo, dict)
+                or isinstance(photo.get("id"), bool)
+                or not isinstance(photo.get("id"), (str, int))
+            ):
+                raise DheniError(502, "photo-list response contains invalid metadata")
+            file_metadata = photo.get("file")
+            filename = ""
+            if isinstance(file_metadata, dict):
+                filename = str(
+                    file_metadata.get("realname") or file_metadata.get("filename") or ""
+                )
+            normalized.append({"photoId": str(photo["id"]), "filename": filename})
+        return normalized
+
+    def download_photo(
+        self, person_id: str, image: dict[str, object], max_image_bytes: int
+    ) -> tuple[bytes, str, str]:
+        encoded_person = urllib.parse.quote(person_id, safe="")
+        encoded_photo = urllib.parse.quote(str(image["photoId"]), safe="")
+        url = f"{self.api_url}/v2/person/{encoded_person}/photos/{encoded_photo}"
+        with self._open(url, accept="image/*") as response:
+            content_type = response.headers.get_content_type()
+            if not content_type.startswith("image/"):
+                raise DheniError(
+                    502, f"photo endpoint returned {content_type}, not an image"
+                )
+            content = response.read(max_image_bytes + 1)
+        if len(content) > max_image_bytes:
+            raise DheniError(413, f"image exceeds the {max_image_bytes}-byte safety limit")
+        if not content:
+            raise DheniError(502, "photo endpoint returned an empty image")
+        supplied_name = Path(str(image.get("filename") or "")).name
+        extension = (
+            Path(supplied_name).suffix
+            or mimetypes.guess_extension(content_type)
+            or ".img"
+        )
+        return content, f"dheni-photo{extension}", content_type
+
+
 def _error_message(raw: bytes) -> str:
     """Return a bounded source error without leaking signed URLs."""
     try:
@@ -97,7 +259,7 @@ def _open_with_retry(request: urllib.request.Request, *, timeout: int = 120):
     raise DheniError(0, "source remained unavailable after retries")
 
 
-def _list_photos(
+def _list_legacy_photos(
     dheni_api: str, api_key: str, local_id: str
 ) -> list[dict[str, object]]:
     """Fetch and validate every photo's metadata for one Dheni person."""
@@ -128,7 +290,7 @@ def _list_photos(
     return images
 
 
-def _download_photo(
+def _download_legacy_photo(
     image: dict[str, object], *, dheni_api: str, max_image_bytes: int
 ) -> tuple[bytes, str, str]:
     """Download one signed image URL and enforce origin and size bounds."""
@@ -167,7 +329,7 @@ def _enrol_one(
     person: Person,
     metadata: dict[str, object],
     *,
-    dheni_api: str,
+    photo_source: LegacyPhotoSource | OAuthPhotoSource,
     hawkeye_api: str,
     hawkeye_token: str,
     source: str,
@@ -176,8 +338,8 @@ def _enrol_one(
     """Download and enrol one photo from a person's source listing."""
     photo_id = str(metadata["photoId"])
     try:
-        content, filename, _content_type = _download_photo(
-            metadata, dheni_api=dheni_api, max_image_bytes=max_image_bytes
+        content, filename, _content_type = photo_source.download_photo(
+            person.local_id, metadata, max_image_bytes
         )
     except DheniError as error:
         status = "source_missing" if error.status == 404 else "source_error"
@@ -213,8 +375,7 @@ def _enrol_person(
     person: Person,
     completed: set[tuple[str, str]],
     *,
-    dheni_api: str,
-    dheni_key: str,
+    photo_source: LegacyPhotoSource | OAuthPhotoSource,
     hawkeye_api: str,
     hawkeye_token: str,
     source: str,
@@ -222,7 +383,7 @@ def _enrol_person(
 ) -> list[ImportResult]:
     """List and enrol all not-yet-checkpointed photos for one person."""
     try:
-        photos = _list_photos(dheni_api, dheni_key, person.local_id)
+        photos = photo_source.list_photos(person.local_id)
     except DheniError as error:
         status = "source_missing" if error.status == 404 else "source_error"
         return [
@@ -249,7 +410,7 @@ def _enrol_person(
             _enrol_one(
                 person,
                 photo,
-                dheni_api=dheni_api,
+                photo_source=photo_source,
                 hawkeye_api=hawkeye_api,
                 hawkeye_token=hawkeye_token,
                 source=source,
@@ -351,14 +512,14 @@ def _submit(
     pool: ThreadPoolExecutor,
     person: Person,
     completed: set[tuple[str, str]],
+    photo_source: LegacyPhotoSource | OAuthPhotoSource,
     args: argparse.Namespace,
 ) -> Future[list[ImportResult]]:
     return pool.submit(
         _enrol_person,
         person,
         completed,
-        dheni_api=args.dheni_api,
-        dheni_key=args.dheni_key,
+        photo_source=photo_source,
         hawkeye_api=args.hawkeye_api,
         hawkeye_token=args.hawkeye_token,
         source=args.source,
@@ -368,6 +529,19 @@ def _submit(
 
 def run(args: argparse.Namespace) -> int:
     """Run a bounded concurrent import and checkpoint every result."""
+    if args.dheni_client_id and args.dheni_client_secret:
+        tokens = OAuthTokenProvider(
+            args.dheni_token_url,
+            args.dheni_client_id,
+            args.dheni_client_secret,
+            args.dheni_scope,
+            args.dheni_audience,
+        )
+        photo_source: LegacyPhotoSource | OAuthPhotoSource = OAuthPhotoSource(
+            args.dheni_photo_api_url, tokens
+        )
+    else:
+        photo_source = LegacyPhotoSource(args.dheni_api, args.dheni_key)
     checkpoint = open_checkpoint(args.checkpoint)
     completed = successful_photos(checkpoint)
     people = islice(read_people(args.manifest), args.offset, None)
@@ -387,7 +561,9 @@ def run(args: argparse.Namespace) -> int:
                     person = next(iterator)
                 except StopIteration:
                     break
-                pending[_submit(pool, person, completed, args)] = person
+                pending[
+                    _submit(pool, person, completed, photo_source, args)
+                ] = person
                 submitted += 1
 
             while pending:
@@ -420,9 +596,9 @@ def run(args: argparse.Namespace) -> int:
                             next_person = next(iterator)
                         except StopIteration:
                             continue
-                        pending[_submit(pool, next_person, completed, args)] = (
-                            next_person
-                        )
+                        pending[
+                            _submit(pool, next_person, completed, photo_source, args)
+                        ] = next_person
                         submitted += 1
     except KeyboardInterrupt:
         print("interrupted; completed rows are checkpointed", file=sys.stderr)
@@ -444,6 +620,29 @@ def main() -> int:
     parser.add_argument("--checkpoint", type=Path, default=Path("dheni-import.sqlite"))
     parser.add_argument("--dheni-api", default=os.environ.get("DHENI_API_URL"))
     parser.add_argument("--dheni-key", default=os.environ.get("DHENI_API_KEY"))
+    parser.add_argument(
+        "--dheni-token-url",
+        default=os.environ.get(
+            "DHENI_TOKEN_URL", "https://iims.police.gov.mv/auth/api/oauth/token"
+        ),
+    )
+    parser.add_argument(
+        "--dheni-photo-api-url",
+        default=os.environ.get(
+            "DHENI_PHOTO_API_URL", "https://iims.police.gov.mv/minio/api"
+        ),
+    )
+    parser.add_argument("--dheni-client-id", default=os.environ.get("DHENI_CLIENT_ID"))
+    parser.add_argument(
+        "--dheni-client-secret", default=os.environ.get("DHENI_CLIENT_SECRET")
+    )
+    parser.add_argument(
+        "--dheni-scope",
+        default=os.environ.get("DHENI_SCOPE", "minio:person-photos"),
+    )
+    parser.add_argument(
+        "--dheni-audience", default=os.environ.get("DHENI_AUDIENCE", "minio")
+    )
     parser.add_argument("--hawkeye-api", default=os.environ.get("HAWKEYE_API"))
     parser.add_argument("--hawkeye-token", default=os.environ.get("HAWKEYE_TOKEN"))
     parser.add_argument("--source", default="dheni")
@@ -460,11 +659,18 @@ def main() -> int:
 
     if not args.manifest.is_file():
         parser.error(f"manifest does not exist: {args.manifest}")
-    for name in ("dheni_api", "dheni_key", "hawkeye_api", "hawkeye_token"):
+    for name in ("hawkeye_api", "hawkeye_token"):
         if not getattr(args, name):
             parser.error(
                 f"--{name.replace('_', '-')} or its environment variable is required"
             )
+    oauth_values = (args.dheni_client_id, args.dheni_client_secret)
+    if any(oauth_values) and not all(oauth_values):
+        parser.error("both --dheni-client-id and --dheni-client-secret are required")
+    if not all(oauth_values) and not (args.dheni_api and args.dheni_key):
+        parser.error(
+            "OAuth client credentials or the legacy Dheni API URL and key are required"
+        )
     if args.workers < 1:
         parser.error("--workers must be at least 1")
     if args.offset < 0:
