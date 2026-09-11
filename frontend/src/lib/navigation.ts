@@ -7,6 +7,7 @@
 
 import {
   ClipboardCheck,
+  DatabaseZap,
   FileClock,
   Fingerprint,
   LayoutDashboard,
@@ -48,6 +49,7 @@ export const NAVIGATION: NavGroup[] = [
   {
     label: "Operations",
     items: [
+      { href: "/ingestion", label: "BlackGlass intake", icon: DatabaseZap, capability: "ingestion" },
       { href: "/identify", label: "Identify", icon: ScanFace, capability: "identify" },
       { href: "/tracker", label: "Live sources", icon: Video, capability: "identify" },
       {

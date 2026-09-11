@@ -24,13 +24,17 @@ const READABLE = [
   /^face-samples\/[0-9a-f-]{36}\/image$/,
   /^statistics$/,
   /^system\/metrics$/,
+  /^media$/,
 ];
 
 const WRITABLE = [
   /^identifications\/[0-9a-f-]{36}\/review$/,
   /^nlp\/speech\/transcribe$/,
   /^nlp\/ocr$/,
+  /^media$/,
 ];
+
+const MAX_BROWSER_MEDIA_BYTES = 50 * 1024 * 1024;
 
 function refuse(): NextResponse {
   return NextResponse.json(
@@ -49,6 +53,29 @@ function refuse(): NextResponse {
 async function forward(request: Request, path: string, allowed: RegExp[]): Promise<Response> {
   if (!allowed.some((pattern) => pattern.test(path))) return refuse();
 
+  if (request.method === "POST" && path === "media") {
+    let sameHost = false;
+    try {
+      const origin = new URL(request.headers.get("origin") ?? "");
+      sameHost = ["http:", "https:"].includes(origin.protocol) && origin.host === request.headers.get("host");
+    } catch {
+      // Browser media submissions must carry a valid same-origin Origin header.
+    }
+    if (!sameHost) {
+      return NextResponse.json(
+        { error: { code: "origin_rejected", message: "Submit from this application.", field: null }, details: [] },
+        { status: 403 },
+      );
+    }
+    const declaredLength = Number(request.headers.get("content-length") ?? 0);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BROWSER_MEDIA_BYTES) {
+      return NextResponse.json(
+        { error: { code: "media_too_large", message: "Choose a file below 50 MB.", field: "file" }, details: [] },
+        { status: 413 },
+      );
+    }
+  }
+
   // The reviewer's own credential, never one belonging to this app: the API
   // attributes the action to them.
   const token = await readToken();
@@ -62,9 +89,17 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
     );
   }
 
-  const isUpload = path === "nlp/speech/transcribe" || path === "nlp/ocr";
+  const isUpload = path === "nlp/speech/transcribe" || path === "nlp/ocr" || path === "media";
   const contentType = request.headers.get("content-type");
-  const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}`, {
+  const requestUrl = new URL(request.url);
+  const uploadBody = request.method === "POST" && isUpload ? await request.arrayBuffer() : null;
+  if (path === "media" && uploadBody !== null && uploadBody.byteLength > MAX_BROWSER_MEDIA_BYTES) {
+    return NextResponse.json(
+      { error: { code: "media_too_large", message: "Choose a file below 50 MB.", field: "file" }, details: [] },
+      { status: 413 },
+    );
+  }
+  const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}${request.method === "GET" ? requestUrl.search : ""}`, {
     method: request.method,
     headers:
       request.method === "POST"
@@ -74,13 +109,13 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Authorization: `Bearer ${token}`,
           }
         : {
-            Accept: path === "system/metrics" || path === "statistics" ? "application/json" : "image/jpeg",
+            Accept: path === "system/metrics" || path === "statistics" || path === "media" ? "application/json" : "image/jpeg",
             Authorization: `Bearer ${token}`,
           },
     body:
       request.method === "POST"
         ? isUpload
-          ? await request.arrayBuffer()
+          ? uploadBody
           : await request.text()
         : undefined,
     cache: "no-store",

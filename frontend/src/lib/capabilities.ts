@@ -31,6 +31,12 @@ export const CAPABILITIES: Record<CapabilityKey, Capability> = {
       "Counts are real and come from the API. Rates and trends are not shown " +
       "because the system keeps no history to derive them from.",
   },
+  ingestion: {
+    state: "partial",
+    supported: ["POST /media with source_type=blackglass", "GET /media"],
+    missing: ["an authenticated BlackGlass pull/webhook contract and durable sync cursor"],
+    note: "Operators can ingest exported BlackGlass files with durable provenance now. Automated synchronization requires the confirmed BlackGlass API contract.",
+  },
   identify: {
     state: "available",
     supported: ["POST /identifications", "GET /identifications/{uuid}"],
@@ -109,6 +115,7 @@ export const CAPABILITIES: Record<CapabilityKey, Capability> = {
 
 export type CapabilityKey =
   | "dashboard"
+  | "ingestion"
   | "identify"
   | "enrollments"
   | "review"

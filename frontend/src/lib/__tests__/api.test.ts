@@ -216,6 +216,70 @@ describe("proxy allowlist", () => {
       Authorization: "Bearer faceid_test-token",
     });
   });
+
+  it("forwards the media list with its bounded query", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, limit: 8, offset: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { GET } = await import("../../app/api/v1/[...path]/route");
+
+    const response = await GET(new Request("http://localhost/api/v1/media?limit=8"), {
+      params: Promise.resolve({ path: ["media"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://api.test:8000/api/v1/media?limit=8");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer faceid_test-token",
+    });
+  });
+
+  it("rejects a cross-origin BlackGlass media submission", async () => {
+    const { POST } = await import("../../app/api/v1/[...path]/route");
+    const request = new Request("http://localhost/api/v1/media", {
+      method: "POST",
+      headers: { host: "localhost", origin: "https://attacker.example" },
+      body: "not-media",
+    });
+
+    const response = await POST(request, { params: Promise.resolve({ path: ["media"] }) });
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe("origin_rejected");
+  });
+
+  it("forwards a same-origin BlackGlass media submission with operator authentication", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "stored" }), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../../app/api/v1/[...path]/route");
+    const form = new FormData();
+    form.set("source_type", "blackglass");
+    form.set("external_source_id", "bg-4471");
+    form.set("file", new Blob(["small fixture"], { type: "text/plain" }), "fixture.txt");
+    const request = new Request("http://localhost/api/v1/media", {
+      method: "POST",
+      headers: { host: "localhost", origin: "http://localhost" },
+      body: form,
+    });
+
+    const response = await POST(request, { params: Promise.resolve({ path: ["media"] }) });
+
+    expect(response.status).toBe(201);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://api.test:8000/api/v1/media");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer faceid_test-token",
+    });
+  });
 });
 
 describe("authentication", () => {
