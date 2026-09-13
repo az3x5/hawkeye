@@ -24,6 +24,7 @@ dependencies = [
     "soundfile>=0.13,<1",
     "librosa>=0.11,<1",
     "safetensors>=0.4",
+    "httpx>=0.28",
     "qdrant-client>=1.12",
     "redis>=5.0",
     "python-multipart>=0.0.9",

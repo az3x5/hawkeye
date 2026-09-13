@@ -16,17 +16,41 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.v1.dependencies import get_media_service
+from app.api.v1.blackglass import router as blackglass_router
+from app.api.v1.dependencies import get_language_document_service, get_media_service
 from app.api.v1.media import router as media_router
 from app.connectors.filesystem import FilesystemBlobStore
 from app.core.errors import ErrorResponse, install_error_handlers
 from app.domain.auth import Scope
+from app.domain.language import LanguageDocument, PrimaryScript
+from app.services.language_search import DocumentSubmission
 from app.services.media import MediaService
 
 from .conftest import authenticate
 from .test_media_service import InMemoryMediaRepository, RecordingAuditLog, png
 
 PNG_UPLOAD = ("photo.png", png(32, 24), "image/png")
+
+
+class RecordingLanguageService:
+    """Small contract fake that proves BlackGlass text reaches the language service."""
+
+    request: DocumentSubmission | None = None
+
+    async def submit(self, request: DocumentSubmission) -> tuple[LanguageDocument, bool]:
+        self.request = request
+        return (
+            LanguageDocument(
+                title=request.title,
+                source=request.source,
+                original_text=request.text,
+                normalized_text=request.text,
+                primary_script=PrimaryScript.LATIN,
+                content_sha256="a" * 64,
+                attributes=request.attributes,
+            ),
+            True,
+        )
 
 
 @pytest.fixture
@@ -48,6 +72,7 @@ def build_client(
     app = FastAPI()
     install_error_handlers(app)
     app.include_router(media_router, prefix="/api/v1")
+    app.include_router(blackglass_router, prefix="/api/v1")
 
     service = MediaService(
         repository=repository,
@@ -61,6 +86,12 @@ def build_client(
         return service
 
     app.dependency_overrides[get_media_service] = _service
+    language_service = RecordingLanguageService()
+
+    async def _language_service() -> RecordingLanguageService:
+        return language_service
+
+    app.dependency_overrides[get_language_document_service] = _language_service
     authenticate(app, *scopes)
     with TestClient(app) as test_client:
         yield test_client
@@ -74,7 +105,13 @@ def client(
     tmp_path: Path,
 ) -> Iterator[TestClient]:
     yield from build_client(
-        repository, audit, tmp_path, Scope.MEDIA_READ, Scope.MEDIA_WRITE, Scope.ADMIN
+        repository,
+        audit,
+        tmp_path,
+        Scope.MEDIA_READ,
+        Scope.MEDIA_WRITE,
+        Scope.LANGUAGE,
+        Scope.ADMIN,
     )
 
 
@@ -148,6 +185,114 @@ class TestIngestEndpoint:
 
     def test_an_unknown_source_type_is_refused(self, client: TestClient) -> None:
         assert ingest(client, source_type="telepathy").status_code == 422
+
+
+class TestBlackGlassMediaContract:
+    def test_capabilities_expose_versioned_delivery_endpoints(self, client: TestClient) -> None:
+        response = client.get("/api/v1/integrations/blackglass/capabilities")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["schema_version"] == "1.0"
+        assert body["delivery_endpoints"]["media"].endswith("/blackglass/media")
+        assert all(route["state"] != "not_applicable" for route in body["analyses"])
+
+    def test_delivery_fixes_provenance_to_blackglass(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/media",
+            data={
+                "external_object_id": "bg-4471",
+                "external_object_type": "post",
+                "source_system": "blackglass-prod",
+                "requested_analyses": '["face_identification", "vehicle_detection"]',
+            },
+            files={"file": PNG_UPLOAD},
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["source"]["object_id"] == "bg-4471"
+        assert body["media_source"]["source_type"] == "blackglass"
+        assert body["subject"]["type"] == "media"
+        assert body["analysis_routes"] == [
+            {
+                "capability": "face_identification",
+                "state": "available_on_demand",
+                "endpoint": "/api/v1/identifications",
+                "detail": (
+                    "Available through the named authenticated API; automatic media "
+                    "routing is next."
+                ),
+            },
+            {
+                "capability": "vehicle_detection",
+                "state": "not_connected",
+                "endpoint": None,
+                "detail": (
+                    "The model artifact may be installed, but no production result "
+                    "worker is connected yet."
+                ),
+            },
+        ]
+
+    def test_redelivery_is_idempotent_on_content_and_source(self, client: TestClient) -> None:
+        fields = {
+            "external_object_id": "bg-repeat",
+            "external_object_type": "media",
+        }
+        first = client.post(
+            "/api/v1/integrations/blackglass/media",
+            data=fields,
+            files={"file": PNG_UPLOAD},
+        ).json()
+        second = client.post(
+            "/api/v1/integrations/blackglass/media",
+            data=fields,
+            files={"file": PNG_UPLOAD},
+        ).json()
+        assert first["subject"] == second["subject"]
+        assert second["status"] == "already_exists"
+
+    def test_unknown_analysis_is_rejected(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/media",
+            data={
+                "external_object_id": "bg-invalid",
+                "external_object_type": "media",
+                "requested_analyses": "mind_reading",
+            },
+            files={"file": PNG_UPLOAD},
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_media"
+
+    def test_image_defaults_are_selected_after_type_detection(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/media",
+            data={"external_object_id": "bg-default", "external_object_type": "image"},
+            files={"file": PNG_UPLOAD},
+        )
+        assert [route["capability"] for route in response.json()["analysis_routes"]] == [
+            "object_detection",
+            "ocr",
+        ]
+
+    def test_text_is_persisted_with_source_envelope(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/text",
+            json={
+                "source": {
+                    "system": "blackglass-prod",
+                    "object_type": "post",
+                    "object_id": "post-91",
+                },
+                "title": "Collected post",
+                "text": "miadhu male gai vaahaka dhakkaa",
+                "language_hint": "dv-Latn",
+            },
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["subject"]["type"] == "language_document"
+        assert body["analysis_routes"][0]["state"] == "queued"
 
 
 class TestReadEndpoints:

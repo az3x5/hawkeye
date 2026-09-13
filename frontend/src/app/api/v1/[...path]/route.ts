@@ -25,6 +25,7 @@ const READABLE = [
   /^statistics$/,
   /^system\/metrics$/,
   /^media$/,
+  /^integrations\/blackglass\/capabilities$/,
 ];
 
 const WRITABLE = [
@@ -32,6 +33,7 @@ const WRITABLE = [
   /^nlp\/speech\/transcribe$/,
   /^nlp\/ocr$/,
   /^media$/,
+  /^integrations\/blackglass\/(media|text)$/,
 ];
 
 const MAX_BROWSER_MEDIA_BYTES = 50 * 1024 * 1024;
@@ -53,7 +55,8 @@ function refuse(): NextResponse {
 async function forward(request: Request, path: string, allowed: RegExp[]): Promise<Response> {
   if (!allowed.some((pattern) => pattern.test(path))) return refuse();
 
-  if (request.method === "POST" && path === "media") {
+  const isBrowserMedia = path === "media" || path === "integrations/blackglass/media";
+  if (request.method === "POST" && isBrowserMedia) {
     let sameHost = false;
     try {
       const origin = new URL(request.headers.get("origin") ?? "");
@@ -89,11 +92,11 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
     );
   }
 
-  const isUpload = path === "nlp/speech/transcribe" || path === "nlp/ocr" || path === "media";
+  const isUpload = path === "nlp/speech/transcribe" || path === "nlp/ocr" || isBrowserMedia;
   const contentType = request.headers.get("content-type");
   const requestUrl = new URL(request.url);
   const uploadBody = request.method === "POST" && isUpload ? await request.arrayBuffer() : null;
-  if (path === "media" && uploadBody !== null && uploadBody.byteLength > MAX_BROWSER_MEDIA_BYTES) {
+  if (isBrowserMedia && uploadBody !== null && uploadBody.byteLength > MAX_BROWSER_MEDIA_BYTES) {
     return NextResponse.json(
       { error: { code: "media_too_large", message: "Choose a file below 50 MB.", field: "file" }, details: [] },
       { status: 413 },
@@ -109,7 +112,7 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Authorization: `Bearer ${token}`,
           }
         : {
-            Accept: path === "system/metrics" || path === "statistics" || path === "media" ? "application/json" : "image/jpeg",
+            Accept: path === "system/metrics" || path === "statistics" || path === "media" || path === "integrations/blackglass/capabilities" ? "application/json" : "image/jpeg",
             Authorization: `Bearer ${token}`,
           },
     body:
