@@ -32,6 +32,23 @@ class DecisionOutcome(StrEnum):
     REJECT = "reject"
 
 
+class CaptureAssurance(StrEnum):
+    """How much is known about the provenance of the submitted image.
+
+    The system has no presentation-attack detection: it compares faces, and a
+    printed photograph, a screen, or a mask presented to a camera produces an
+    embedding exactly like a live face does. Nothing downstream can recover
+    that distinction, so it has to be carried with the request.
+    """
+
+    #: An operator with identify scope attests they observed the live subject
+    #: at the moment of capture. The attestation is theirs, and it is recorded.
+    SUPERVISED = "supervised"
+    #: A stored file, a forwarded frame, or anything whose origin is unknown.
+    #: This is the default: an unattested capture is an unsupervised one.
+    UNSUPERVISED = "unsupervised"
+
+
 class ReviewOutcome(StrEnum):
     """What a human concluded about an identification."""
 
@@ -99,6 +116,22 @@ class IdentityDecision:
     outcome: DecisionOutcome
     thresholds: DecisionThresholds
     candidates: tuple[Candidate, ...]
+    assurance: CaptureAssurance = CaptureAssurance.UNSUPERVISED
+
+    @property
+    def capped_by_assurance(self) -> bool:
+        """True when only the capture's provenance kept this out of ``accept``.
+
+        Surfaced so a reviewer sees that the score cleared the accept bar and
+        the *evidence about the image* is what sent it to them, rather than
+        being left to infer it from the numbers.
+        """
+        best = self.best
+        return (
+            self.outcome is DecisionOutcome.REVIEW
+            and best is not None
+            and best.score >= self.thresholds.accept_at
+        )
 
     @property
     def best(self) -> Candidate | None:
@@ -148,18 +181,33 @@ def aggregate_candidates(matches: Sequence[VectorMatch]) -> tuple[Candidate, ...
     return tuple(candidates)
 
 
-def decide(matches: Sequence[VectorMatch], thresholds: DecisionThresholds) -> IdentityDecision:
+def decide(
+    matches: Sequence[VectorMatch],
+    thresholds: DecisionThresholds,
+    assurance: CaptureAssurance = CaptureAssurance.UNSUPERVISED,
+) -> IdentityDecision:
     """Turn neighbours into a proposal, under the given thresholds.
 
     Three bands: at or above ``accept_at`` the system proposes a match; at or
     above ``review_at`` it asks a human; below that it proposes nobody. The
     bands are closed at the bottom so a score exactly on a threshold falls on
     the more cautious side of the boundary being crossed.
+
+    A similarity score answers "does this image match a known face", which is
+    not the same question as "is this a face that was really there". Without
+    presentation-attack detection the second question has no answer, so an
+    unsupervised capture is never allowed to reach ``accept``: it is held at
+    ``review`` for a human, however high it scores. Downgrading here rather
+    than at the API boundary means every caller gets the rule, including ones
+    written later.
     """
     candidates = aggregate_candidates(matches)
     if not candidates:
         return IdentityDecision(
-            outcome=DecisionOutcome.REJECT, thresholds=thresholds, candidates=()
+            outcome=DecisionOutcome.REJECT,
+            thresholds=thresholds,
+            candidates=(),
+            assurance=assurance,
         )
 
     top = candidates[0].score
@@ -169,7 +217,13 @@ def decide(matches: Sequence[VectorMatch], thresholds: DecisionThresholds) -> Id
         outcome = DecisionOutcome.REVIEW
     else:
         outcome = DecisionOutcome.REJECT
-    return IdentityDecision(outcome=outcome, thresholds=thresholds, candidates=candidates)
+
+    if outcome is DecisionOutcome.ACCEPT and assurance is not CaptureAssurance.SUPERVISED:
+        outcome = DecisionOutcome.REVIEW
+
+    return IdentityDecision(
+        outcome=outcome, thresholds=thresholds, candidates=candidates, assurance=assurance
+    )
 
 
 @dataclass(frozen=True, slots=True)

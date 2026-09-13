@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ from app.domain.auth import Scope
 from app.domain.detection import BoundingBox
 from app.domain.identity import (
     Candidate,
+    CaptureAssurance,
     DecisionOutcome,
     DecisionThresholds,
     IdentityDecision,
@@ -88,6 +90,7 @@ class FakeService:
         )
         self.embed_error: str | None = None
         self.live_face_count = 0
+        self.assurance: CaptureAssurance | None = None
         self.audit: list[AuditEvent] = []
 
     async def embed_query(self, image_bytes: bytes) -> FaceEmbedding:
@@ -101,11 +104,20 @@ class FakeService:
         )
 
     async def identify(
-        self, embedding: FaceEmbedding, *, query_bytes: bytes, actor: object = None
+        self,
+        embedding: FaceEmbedding,
+        *,
+        query_bytes: bytes,
+        actor: object = None,
+        assurance: CaptureAssurance = CaptureAssurance.UNSUPERVISED,
     ) -> IdentificationResult:
         identification_uuid = uuid4()
-        await self.store.add(identification_uuid, "0" * 64, self.decision)
-        return IdentificationResult(identification_uuid, self.decision)
+        # The fake carries the assurance through rather than dropping it, so a
+        # handler that forgot to pass it on would fail here rather than pass.
+        self.assurance = assurance
+        decision = replace(self.decision, assurance=assurance)
+        await self.store.add(identification_uuid, "0" * 64, decision)
+        return IdentificationResult(identification_uuid, decision)
 
     async def embed_live_frame(self, image_bytes: bytes) -> LiveFrameEmbeddings:
         embedding = await self.embed_query(image_bytes)
@@ -181,6 +193,52 @@ def client(service: FakeService, store: FakeStore) -> Iterator[TestClient]:
 
 def _identify(client: TestClient, **data: str) -> httpx2.Response:
     return client.post("/api/v1/identifications", data=data, files={"image": JPEG})
+
+
+class TestCaptureAssurance:
+    """The attestation must reach the service, not stop at the schema."""
+
+    def test_an_unattested_upload_is_treated_as_unsupervised(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        body = _identify(client).json()
+        assert service.assurance is CaptureAssurance.UNSUPERVISED
+        assert body["capture_assurance"] == "unsupervised"
+
+    def test_an_operator_can_attest_to_supervising_the_capture(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        body = _identify(client, capture_assurance="supervised").json()
+        assert service.assurance is CaptureAssurance.SUPERVISED
+        assert body["capture_assurance"] == "supervised"
+
+    def test_an_unknown_assurance_fails_validation(self, client: TestClient) -> None:
+        assert _identify(client, capture_assurance="trust-me").status_code == 422
+
+    def test_the_live_frame_endpoint_also_carries_the_attestation(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        service.live_face_count = 1
+        response = client.post(
+            "/api/v1/live/frames/analyze",
+            data={"capture_assurance": "supervised"},
+            files={"image": JPEG},
+        )
+        assert response.status_code == 201
+        assert service.assurance is CaptureAssurance.SUPERVISED
+
+    def test_the_capped_flag_is_carried_to_the_caller(
+        self, client: TestClient, service: FakeService
+    ) -> None:
+        """A reviewer must see that provenance, not the score, sent this to them."""
+        service.decision = IdentityDecision(
+            outcome=DecisionOutcome.REVIEW,
+            thresholds=POLICY,
+            candidates=_candidates(POLICY.accept_at + 0.1),
+        )
+        body = _identify(client).json()
+        assert body["outcome"] == "review"
+        assert body["capped_by_assurance"] is True
 
 
 class TestIdentify:

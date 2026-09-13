@@ -13,6 +13,7 @@ import pytest
 
 from app.domain.identity import (
     Candidate,
+    CaptureAssurance,
     DecisionOutcome,
     DecisionThresholds,
     IdentityDecision,
@@ -101,7 +102,8 @@ class TestAggregation:
 
 class TestDecisionBands:
     def test_a_strong_match_is_accepted(self) -> None:
-        assert decide([_match(0.91)], POLICY).outcome is DecisionOutcome.ACCEPT
+        outcome = decide([_match(0.91)], POLICY, CaptureAssurance.SUPERVISED).outcome
+        assert outcome is DecisionOutcome.ACCEPT
 
     def test_a_middling_match_goes_to_review(self) -> None:
         assert decide([_match(0.50)], POLICY).outcome is DecisionOutcome.REVIEW
@@ -115,7 +117,8 @@ class TestDecisionBands:
         assert decision.best is None
 
     def test_the_accept_boundary_is_inclusive(self) -> None:
-        assert decide([_match(POLICY.accept_at)], POLICY).outcome is DecisionOutcome.ACCEPT
+        decision = decide([_match(POLICY.accept_at)], POLICY, CaptureAssurance.SUPERVISED)
+        assert decision.outcome is DecisionOutcome.ACCEPT
 
     def test_just_below_accept_asks_for_review(self) -> None:
         assert decide([_match(POLICY.accept_at - 1e-9)], POLICY).outcome is DecisionOutcome.REVIEW
@@ -127,7 +130,9 @@ class TestDecisionBands:
         assert decide([_match(POLICY.review_at - 1e-9)], POLICY).outcome is DecisionOutcome.REJECT
 
     def test_only_the_top_candidate_sets_the_outcome(self) -> None:
-        decision = decide([_match(0.95), _match(0.10), _match(0.05)], POLICY)
+        decision = decide(
+            [_match(0.95), _match(0.10), _match(0.05)], POLICY, CaptureAssurance.SUPERVISED
+        )
         assert decision.outcome is DecisionOutcome.ACCEPT
         assert len(decision.candidates) == 3
 
@@ -138,8 +143,9 @@ class TestPolicyIsNotBakedIn:
         lenient = DecisionThresholds(accept_at=0.50, review_at=0.30, policy_version="lenient")
         strict = DecisionThresholds(accept_at=0.90, review_at=0.80, policy_version="strict")
 
-        assert decide(evidence, lenient).outcome is DecisionOutcome.ACCEPT
-        assert decide(evidence, strict).outcome is DecisionOutcome.REJECT
+        supervised = CaptureAssurance.SUPERVISED
+        assert decide(evidence, lenient, supervised).outcome is DecisionOutcome.ACCEPT
+        assert decide(evidence, strict, supervised).outcome is DecisionOutcome.REJECT
 
     def test_the_decision_carries_the_policy_that_produced_it(self) -> None:
         decision = decide([_match(0.7)], POLICY)
@@ -176,7 +182,7 @@ class TestMargin:
 
     def test_a_narrow_margin_does_not_change_the_outcome_by_itself(self) -> None:
         """The number is surfaced for a reviewer; acting on it is their call."""
-        decision = decide([_match(0.95), _match(0.9499)], POLICY)
+        decision = decide([_match(0.95), _match(0.9499)], POLICY, CaptureAssurance.SUPERVISED)
         assert decision.outcome is DecisionOutcome.ACCEPT
         assert decision.margin is not None
         assert decision.margin < 0.01
@@ -196,3 +202,46 @@ def test_decision_is_immutable() -> None:
     decision = IdentityDecision(outcome=DecisionOutcome.ACCEPT, thresholds=POLICY, candidates=())
     with pytest.raises(Exception):  # noqa: B017 - frozen dataclass
         decision.outcome = DecisionOutcome.REJECT  # type: ignore[misc]
+
+
+class TestCaptureAssurance:
+    """Without presentation-attack detection, provenance has to do that work."""
+
+    def test_an_unsupervised_capture_never_reaches_accept(self) -> None:
+        decision = decide([_match(0.99)], POLICY, CaptureAssurance.UNSUPERVISED)
+        assert decision.outcome is DecisionOutcome.REVIEW
+
+    def test_the_cap_is_the_default_for_a_caller_that_says_nothing(self) -> None:
+        """Silence must be the cautious reading, not the permissive one."""
+        assert decide([_match(0.99)], POLICY).outcome is DecisionOutcome.REVIEW
+
+    def test_a_supervised_capture_can_be_accepted(self) -> None:
+        decision = decide([_match(0.99)], POLICY, CaptureAssurance.SUPERVISED)
+        assert decision.outcome is DecisionOutcome.ACCEPT
+
+    def test_a_capped_decision_says_the_score_was_not_the_problem(self) -> None:
+        decision = decide([_match(0.99)], POLICY, CaptureAssurance.UNSUPERVISED)
+        assert decision.capped_by_assurance
+
+    def test_an_ordinary_review_is_not_reported_as_capped(self) -> None:
+        """A score genuinely in the review band was not held back by provenance."""
+        middling = (POLICY.accept_at + POLICY.review_at) / 2
+        decision = decide([_match(middling)], POLICY, CaptureAssurance.UNSUPERVISED)
+        assert decision.outcome is DecisionOutcome.REVIEW
+        assert not decision.capped_by_assurance
+
+    def test_the_cap_does_not_promote_a_rejection(self) -> None:
+        """Capping lowers an accept; it must never raise a reject into review."""
+        decision = decide([_match(0.01)], POLICY, CaptureAssurance.UNSUPERVISED)
+        assert decision.outcome is DecisionOutcome.REJECT
+        assert not decision.capped_by_assurance
+
+    def test_the_assurance_is_carried_on_the_decision(self) -> None:
+        decision = decide([_match(0.99)], POLICY, CaptureAssurance.SUPERVISED)
+        assert decision.assurance is CaptureAssurance.SUPERVISED
+
+    def test_supervision_does_not_lower_the_threshold(self) -> None:
+        """Attesting to a capture buys accept-eligibility, not a weaker bar."""
+        below = POLICY.accept_at - 1e-9
+        decision = decide([_match(below)], POLICY, CaptureAssurance.SUPERVISED)
+        assert decision.outcome is DecisionOutcome.REVIEW

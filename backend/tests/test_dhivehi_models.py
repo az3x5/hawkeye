@@ -48,9 +48,7 @@ def test_bot_owns_system_prompt_and_reports_installed_digest(
     def fake_get(url: str, **_kwargs: object) -> httpx.Response:
         return httpx.Response(
             200,
-            json={
-                "models": [{"name": "qwen3:4b-instruct", "digest": "sha256:test-digest"}]
-            },
+            json={"models": [{"name": "qwen3:4b-instruct", "digest": "sha256:test-digest"}]},
             request=httpx.Request("GET", url),
         )
 

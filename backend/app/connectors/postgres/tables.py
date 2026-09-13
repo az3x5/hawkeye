@@ -139,11 +139,24 @@ identifications = Table(
     Column("best_score", Float, nullable=True),
     Column("candidates", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    # What was attested about the image itself. Stored with the decision for
+    # the same reason the thresholds are: it is part of the rules that produced
+    # the outcome, and a past decision must stay readable against them.
+    Column(
+        "capture_assurance",
+        String(16),
+        nullable=False,
+        server_default=text("'unsupervised'"),
+    ),
     Column("review_outcome", String(16), nullable=True),
     Column("reviewed_by", String(256), nullable=True),
     Column("reviewed_at", DateTime(timezone=True), nullable=True),
     Column("review_note", Text(), nullable=True),
     CheckConstraint("outcome IN ('accept', 'review', 'reject')", name="ck_identification_outcome"),
+    CheckConstraint(
+        "capture_assurance IN ('supervised', 'unsupervised')",
+        name="ck_identification_capture_assurance",
+    ),
     CheckConstraint(
         "review_outcome IS NULL OR review_outcome IN ('confirmed', 'rejected')",
         name="ck_identification_review_outcome",

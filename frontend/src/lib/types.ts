@@ -21,12 +21,21 @@ export interface Candidate {
   sample_count: number;
 }
 
+/**
+ * What was attested about where the image came from. The system has no
+ * presentation-attack detection, so an unsupervised image may be a photograph
+ * of a photograph and can never be accepted automatically.
+ */
+export type CaptureAssurance = "supervised" | "unsupervised";
+
 export interface Identification {
   identification_uuid: string;
   outcome: DecisionOutcome;
   thresholds: Thresholds;
   candidates: Candidate[];
   margin: number | null;
+  capture_assurance: CaptureAssurance;
+  capped_by_assurance: boolean;
   review_outcome: ReviewOutcome | null;
   reviewed_by: string | null;
   reviewed_at: string | null;

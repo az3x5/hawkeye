@@ -20,6 +20,7 @@ from app.connectors.filesystem.object_store import sha256_bytes
 from app.domain.audit import SYSTEM_ACTOR, Actor, AuditAction, AuditEvent, AuditLog
 from app.domain.detection import BoundingBox
 from app.domain.identity import (
+    CaptureAssurance,
     DecisionOutcome,
     DecisionThresholds,
     IdentificationStore,
@@ -148,11 +149,16 @@ class IdentificationService:
         return LiveFrameEmbeddings(width=width, height=height, faces=faces)
 
     async def identify(
-        self, embedding: FaceEmbedding, *, query_bytes: bytes, actor: Actor | None = None
+        self,
+        embedding: FaceEmbedding,
+        *,
+        query_bytes: bytes,
+        actor: Actor | None = None,
+        assurance: CaptureAssurance = CaptureAssurance.UNSUPERVISED,
     ) -> IdentificationResult:
         """Search for the face and record the resulting proposal."""
         matches = await self._vectors.search(embedding, limit=self._candidate_limit)
-        decision = decide(matches, self._thresholds)
+        decision = decide(matches, self._thresholds, assurance)
 
         identification_uuid = uuid4()
         query_sha256 = sha256_bytes(query_bytes)
@@ -179,6 +185,8 @@ class IdentificationService:
                     "best_score": best.score if best else None,
                     "margin": decision.margin,
                     "candidate_count": len(decision.candidates),
+                    "capture_assurance": decision.assurance.value,
+                    "capped_by_assurance": decision.capped_by_assurance,
                     "query_sha256": query_sha256,
                 },
             )

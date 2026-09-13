@@ -34,9 +34,7 @@ class DhivehiAIClient:
 
     async def text(self, task: DhivehiTask, text: str) -> dict[str, str]:
         """Run an explicit text-to-text model."""
-        response = await self._request(
-            "POST", "/v1/text", json={"task": task.value, "text": text}
-        )
+        response = await self._request("POST", "/v1/text", json={"task": task.value, "text": text})
         return {str(key): str(value) for key, value in response.items()}
 
     async def chat(
