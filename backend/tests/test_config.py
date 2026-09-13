@@ -38,6 +38,24 @@ def test_no_credentials_are_defaulted_in_code(monkeypatch: pytest.MonkeyPatch) -
     assert settings.qdrant_api_key is None
 
 
+def test_blackglass_aws_source_accepts_existing_server_variable_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key, value in TEST_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "read-only-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "not-returned")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-south-1")
+    monkeypatch.setenv("AWS_BUCKET", "blackglass-source")
+    monkeypatch.setenv("AWS_PREFIX", "persons/")
+
+    settings = Settings()  # type: ignore[call-arg]
+
+    assert settings.blackglass_s3_bucket == "blackglass-source"
+    assert settings.blackglass_aws_region == "ap-south-1"
+    assert settings.blackglass_s3_prefix == "persons/"
+
+
 def test_retry_ceiling_cannot_be_below_initial_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

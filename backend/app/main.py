@@ -31,7 +31,12 @@ from app.connectors.redis import (
     RedisLanguageJobQueue,
     RedisRateLimiter,
 )
-from app.connectors.s3 import S3BlobStore, S3Config
+from app.connectors.s3 import (
+    BlackGlassS3Config,
+    BlackGlassS3Source,
+    S3BlobStore,
+    S3Config,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
 from app.core.logging import configure_logging
@@ -93,6 +98,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # makes media unavailable, which readiness already reports, while
             # face identification and language search keep working.
             logger.exception("could not ensure media bucket %s", bucket)
+
+    app.state.blackglass_s3 = None
+    if all(
+        (
+            settings.blackglass_aws_region,
+            settings.blackglass_s3_bucket,
+            settings.blackglass_aws_access_key_id,
+            settings.blackglass_aws_secret_access_key,
+        )
+    ):
+        app.state.blackglass_s3 = BlackGlassS3Source(
+            BlackGlassS3Config(
+                bucket=settings.blackglass_s3_bucket or "",
+                region=settings.blackglass_aws_region or "",
+                access_key=settings.blackglass_aws_access_key_id or "",
+                secret_key=settings.blackglass_aws_secret_access_key or "",
+                prefix=settings.blackglass_s3_prefix,
+            )
+        )
+        logger.info(
+            "BlackGlass AWS source configured",
+            extra={
+                "bucket": settings.blackglass_s3_bucket,
+                "prefix": settings.blackglass_s3_prefix,
+            },
+        )
 
     # Identification answers in the request path, so its models live here.
     # Enrolment still hands its work to the worker; only identification pays

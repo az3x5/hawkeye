@@ -8,6 +8,8 @@ these bytes" is a load-bearing question rather than a formality.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,12 +19,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.blackglass import router as blackglass_router
-from app.api.v1.dependencies import get_language_document_service, get_media_service
+from app.api.v1.dependencies import (
+    get_blackglass_s3_source,
+    get_enrolment_service,
+    get_language_document_service,
+    get_media_service,
+)
 from app.api.v1.media import router as media_router
 from app.connectors.filesystem import FilesystemBlobStore
+from app.connectors.s3 import (
+    BlackGlassS3Body,
+    BlackGlassS3Config,
+    BlackGlassS3Object,
+    BlackGlassS3Page,
+)
 from app.core.errors import ErrorResponse, install_error_handlers
 from app.domain.auth import Scope
 from app.domain.language import LanguageDocument, PrimaryScript
+from app.domain.models import FaceSample, Person
+from app.services.enrolment import EnrolmentRequest, EnrolmentResult
 from app.services.language_search import DocumentSubmission
 from app.services.media import MediaService
 
@@ -51,6 +66,54 @@ class RecordingLanguageService:
             ),
             True,
         )
+
+
+class RecordingBlackGlassSource:
+    """Configured S3 source fake with one resumable page."""
+
+    config = BlackGlassS3Config(
+        bucket="blackglass-test", region="ap-south-1", access_key="x", secret_key="y"
+    )
+
+    async def ping(self) -> None:
+        return None
+
+    async def list_page(self, *, limit: int, cursor: str | None = None) -> BlackGlassS3Page:
+        assert 1 <= limit <= 200
+        assert cursor in {None, "page-1"}
+        return BlackGlassS3Page(
+            objects=(
+                BlackGlassS3Object(
+                    key="persons/991/photo.png",
+                    size_bytes=len(PNG_UPLOAD[1]),
+                    etag="etag-1",
+                    last_modified=datetime.now(UTC),
+                ),
+            ),
+            next_cursor="page-2",
+        )
+
+    async def read(self, key: str, *, max_bytes: int) -> BlackGlassS3Body:
+        assert key == "persons/991/photo.png"
+        assert len(PNG_UPLOAD[1]) < max_bytes
+        return BlackGlassS3Body(PNG_UPLOAD[1], "image/png")
+
+
+class RecordingEnrolmentService:
+    """Proves AWS objects enter the existing durable face pipeline."""
+
+    def __init__(self) -> None:
+        self.requests: list[EnrolmentRequest] = []
+
+    async def enrol(self, request: EnrolmentRequest) -> EnrolmentResult:
+        self.requests.append(request)
+        person = Person()
+        sample = FaceSample(
+            person_uuid=person.person_uuid,
+            image_sha256=sha256(request.image).hexdigest(),
+            source=request.source,
+        )
+        return EnrolmentResult(person=person, sample=sample, created=True)
 
 
 @pytest.fixture
@@ -92,6 +155,17 @@ def build_client(
         return language_service
 
     app.dependency_overrides[get_language_document_service] = _language_service
+    blackglass_source = RecordingBlackGlassSource()
+    enrolment_service = RecordingEnrolmentService()
+
+    async def _blackglass_source() -> RecordingBlackGlassSource:
+        return blackglass_source
+
+    async def _enrolment_service() -> RecordingEnrolmentService:
+        return enrolment_service
+
+    app.dependency_overrides[get_blackglass_s3_source] = _blackglass_source
+    app.dependency_overrides[get_enrolment_service] = _enrolment_service
     authenticate(app, *scopes)
     with TestClient(app) as test_client:
         yield test_client
@@ -293,6 +367,38 @@ class TestBlackGlassMediaContract:
         body = response.json()
         assert body["subject"]["type"] == "language_document"
         assert body["analysis_routes"][0]["state"] == "queued"
+
+    def test_aws_status_exposes_no_credentials(self, client: TestClient) -> None:
+        response = client.get("/api/v1/integrations/blackglass/aws/status")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["accessible"] is True
+        assert body["bucket"] == "blackglass-test"
+        assert "access" not in body
+        assert "secret" not in body
+
+    def test_aws_face_page_enters_embedding_pipeline(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/aws/faces/import",
+            json={"limit": 25},
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["scanned"] == 1
+        assert body["accepted"] == 1
+        assert body["next_cursor"] == "page-2"
+        assert body["items"][0]["external_person_id"] == "991"
+        assert body["items"][0]["processing_state"] == "pending"
+
+    def test_aws_dry_run_only_reports_eligibility(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/blackglass/aws/faces/import",
+            json={"limit": 1, "cursor": "page-1", "dry_run": True},
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["accepted"] == 0
+        assert body["items"][0]["status"] == "eligible"
 
 
 class TestReadEndpoints:

@@ -20,6 +20,8 @@ BlackGlass can push directly to EagleEye without using the operator UI:
 - `GET /api/v1/integrations/blackglass/capabilities`
 - `POST /api/v1/integrations/blackglass/media`
 - `POST /api/v1/integrations/blackglass/text`
+- `GET /api/v1/integrations/blackglass/aws/status`
+- `POST /api/v1/integrations/blackglass/aws/faces/import`
 
 Media delivery is multipart and requires `external_object_id`,
 `external_object_type`, a file, and an optional JSON or comma-separated
@@ -32,6 +34,38 @@ actual bytes: object detection and OCR for images, object detection/tracking/
 transcription for video, transcription for audio, and OCR for PDF. A route
 reported as `not_connected` is returned explicitly but does not falsely claim
 that a production result worker has completed it.
+
+## AWS face backfill
+
+When BlackGlass exports person images to AWS as
+`persons/{personId}/{image}`, an administrator can ask EagleEye to fetch a
+bounded page directly. AWS credentials stay in the API container environment;
+they are never accepted in the request or returned in a response.
+
+Start with a dry run:
+
+```bash
+curl -sS http://cyber-ai:8000/api/v1/integrations/blackglass/aws/faces/import \
+  -H "Authorization: Bearer $EAGLEEYE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":50,"dry_run":true}'
+```
+
+Then import the page:
+
+```bash
+curl -sS http://cyber-ai:8000/api/v1/integrations/blackglass/aws/faces/import \
+  -H "Authorization: Bearer $EAGLEEYE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":50,"dry_run":false}'
+```
+
+Pass the returned `next_cursor` as `cursor` on the next call. Each accepted
+object is validated from its bytes, linked to the source-scoped BlackGlass
+person ID, stored idempotently, and queued. The GPU worker detects the face,
+aligns it to the canonical 112x112 crop, creates an AdaFace embedding, and
+writes that vector plus model provenance to Qdrant. Replaying a page does not
+duplicate a person, sample, job, or vector.
 
 The reference sender is `scripts/blackglass_to_eagleeye.py`. It reads the
 credential from `EAGLEEYE_TOKEN`, never a command-line argument:

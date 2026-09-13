@@ -17,7 +17,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.v1.dependencies import get_language_document_service, get_media_service
+from app.api.v1.dependencies import (
+    get_blackglass_s3_source,
+    get_enrolment_service,
+    get_language_document_service,
+    get_media_service,
+)
+from app.api.v1.enrolments import MAX_IMAGE_BYTES
 from app.api.v1.media import (
     AssetSourceResponse,
     InvalidMediaError,
@@ -26,11 +32,20 @@ from app.api.v1.media import (
     read_bounded_upload,
 )
 from app.api.v1.security import require
-from app.core.errors import ErrorResponse
+from app.connectors.s3 import BlackGlassS3Error, BlackGlassS3Source
+from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
-from app.domain.content_types import MediaTooLargeError, UnsupportedMediaError
+from app.domain.content_types import (
+    IMAGE_FORMATS,
+    MediaTooLargeError,
+    UnsupportedMediaError,
+    sniff,
+    verify_declared,
+)
 from app.domain.jobs import ProcessingState
 from app.domain.media import Classification, MediaError, SourceType
+from app.domain.models import DomainValidationError
+from app.services.enrolment import EnrolmentError, EnrolmentRequest, EnrolmentService
 from app.services.language_search import DocumentSubmission, LanguageDocumentService
 from app.services.media import IngestRequest, MediaService
 
@@ -126,6 +141,63 @@ class BlackGlassCapabilityResponse(BaseModel):
     delivery_endpoints: dict[str, str]
     analyses: list[AnalysisRoute]
     guarantees: list[str]
+
+
+class BlackGlassAwsImportRequest(BaseModel):
+    """One bounded, resumable import step over the configured persons prefix."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: str | None = Field(default=None, max_length=4096)
+    dry_run: bool = False
+
+
+class BlackGlassAwsObjectResult(BaseModel):
+    """Outcome for one source object without returning its bytes."""
+
+    key: str
+    external_person_id: str | None = None
+    etag: str
+    size_bytes: int
+    status: Literal["eligible", "accepted", "already_enrolled", "skipped", "failed"]
+    person_uuid: UUID | None = None
+    face_sample_uuid: UUID | None = None
+    processing_state: ProcessingState | None = None
+    detail: str | None = None
+
+
+class BlackGlassAwsImportResponse(BaseModel):
+    """A resumable page acknowledgement."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    bucket: str
+    prefix: str
+    dry_run: bool
+    scanned: int
+    accepted: int
+    already_enrolled: int
+    skipped: int
+    failed: int
+    next_cursor: str | None
+    items: list[BlackGlassAwsObjectResult]
+
+
+class BlackGlassAwsStatusResponse(BaseModel):
+    """Non-secret configuration and connectivity state."""
+
+    configured: Literal[True] = True
+    accessible: bool
+    bucket: str
+    prefix: str
+    normalization_pipeline: str
+    vector_store: str
+
+
+class BlackGlassAwsImportError(FaceIdError):
+    """The upstream AWS source failed before a page could be processed."""
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    code = "blackglass_aws_unavailable"
 
 
 def _requested(value: str) -> list[AnalysisCapability]:
@@ -234,6 +306,8 @@ async def capabilities(
         delivery_endpoints={
             "media": "/api/v1/integrations/blackglass/media",
             "text": "/api/v1/integrations/blackglass/text",
+            "aws_status": "/api/v1/integrations/blackglass/aws/status",
+            "aws_face_import": "/api/v1/integrations/blackglass/aws/faces/import",
         },
         analyses=[
             _route(
@@ -253,6 +327,177 @@ async def capabilities(
             "authenticated and audited delivery",
             "AI candidates are not confirmed identities",
         ],
+    )
+
+
+def _external_person_id(key: str, prefix: str) -> str | None:
+    """Extract `persons/{personId}/...` without trusting a filename as identity."""
+    if not key.startswith(prefix):
+        return None
+    relative = key[len(prefix) :]
+    person_id, separator, filename = relative.partition("/")
+    if not separator or not person_id.strip() or not filename.strip():
+        return None
+    cleaned = person_id.strip()
+    return cleaned if len(cleaned) <= 256 else None
+
+
+@router.get(
+    "/aws/status",
+    response_model=BlackGlassAwsStatusResponse,
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def blackglass_aws_status(
+    source: Annotated[BlackGlassS3Source, Depends(get_blackglass_s3_source)],
+    _principal: Annotated[Principal, Depends(require(Scope.ADMIN))],
+) -> BlackGlassAwsStatusResponse:
+    """Verify the optional source without exposing its credentials."""
+    accessible = True
+    try:
+        await source.ping()
+    except BlackGlassS3Error:
+        accessible = False
+    return BlackGlassAwsStatusResponse(
+        accessible=accessible,
+        bucket=source.config.bucket,
+        prefix=source.config.prefix,
+        normalization_pipeline="SCRFD detection + aligned 112x112 crop + AdaFace",
+        vector_store="Qdrant face embedding collection",
+    )
+
+
+@router.post(
+    "/aws/faces/import",
+    response_model=BlackGlassAwsImportResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def import_blackglass_aws_faces(
+    body: BlackGlassAwsImportRequest,
+    source: Annotated[BlackGlassS3Source, Depends(get_blackglass_s3_source)],
+    enrolments: Annotated[EnrolmentService, Depends(get_enrolment_service)],
+    _principal: Annotated[Principal, Depends(require(Scope.ADMIN))],
+) -> BlackGlassAwsImportResponse:
+    """Fetch one AWS page and enqueue every valid person image for embedding.
+
+    Expensive face normalization remains in the durable GPU worker. This API
+    downloads and validates source bytes, resolves the source-scoped person,
+    stores the image, and creates the existing idempotent embedding job.
+    """
+    try:
+        page = await source.list_page(limit=body.limit, cursor=body.cursor)
+    except BlackGlassS3Error as exc:
+        raise BlackGlassAwsImportError(str(exc)) from exc
+
+    results: list[BlackGlassAwsObjectResult] = []
+    for item in page.objects:
+        external_id = _external_person_id(item.key, source.config.prefix)
+        if external_id is None:
+            results.append(
+                BlackGlassAwsObjectResult(
+                    key=item.key,
+                    etag=item.etag,
+                    size_bytes=item.size_bytes,
+                    status="skipped",
+                    detail="key does not match persons/{personId}/{image}",
+                )
+            )
+            continue
+        if item.size_bytes <= 0 or item.size_bytes > MAX_IMAGE_BYTES:
+            results.append(
+                BlackGlassAwsObjectResult(
+                    key=item.key,
+                    external_person_id=external_id,
+                    etag=item.etag,
+                    size_bytes=item.size_bytes,
+                    status="skipped",
+                    detail=f"image must be between 1 and {MAX_IMAGE_BYTES} bytes",
+                )
+            )
+            continue
+        if body.dry_run:
+            results.append(
+                BlackGlassAwsObjectResult(
+                    key=item.key,
+                    external_person_id=external_id,
+                    etag=item.etag,
+                    size_bytes=item.size_bytes,
+                    status="eligible",
+                )
+            )
+            continue
+
+        try:
+            downloaded = await source.read(item.key, max_bytes=MAX_IMAGE_BYTES)
+            detected = sniff(downloaded.data, allowed=IMAGE_FORMATS)
+            verify_declared(downloaded.content_type, detected.format)
+            enrolled = await enrolments.enrol(
+                EnrolmentRequest(
+                    source=f"blackglass-aws:{source.config.bucket}",
+                    image=downloaded.data,
+                    external_id=external_id,
+                )
+            )
+        except (
+            BlackGlassS3Error,
+            DomainValidationError,
+            EnrolmentError,
+            MediaTooLargeError,
+            UnsupportedMediaError,
+        ) as exc:
+            results.append(
+                BlackGlassAwsObjectResult(
+                    key=item.key,
+                    external_person_id=external_id,
+                    etag=item.etag,
+                    size_bytes=item.size_bytes,
+                    status="failed",
+                    detail=str(exc),
+                )
+            )
+            continue
+        results.append(
+            BlackGlassAwsObjectResult(
+                key=item.key,
+                external_person_id=external_id,
+                etag=item.etag,
+                size_bytes=item.size_bytes,
+                status="accepted" if enrolled.created else "already_enrolled",
+                person_uuid=enrolled.person.person_uuid,
+                face_sample_uuid=enrolled.sample.face_sample_uuid,
+                processing_state=enrolled.sample.processing_state,
+            )
+        )
+
+    counts = {
+        state: sum(item.status == state for item in results)
+        for state in (
+            "accepted",
+            "already_enrolled",
+            "skipped",
+            "failed",
+        )
+    }
+    return BlackGlassAwsImportResponse(
+        bucket=source.config.bucket,
+        prefix=source.config.prefix,
+        dry_run=body.dry_run,
+        scanned=len(results),
+        accepted=counts["accepted"],
+        already_enrolled=counts["already_enrolled"],
+        skipped=counts["skipped"],
+        failed=counts["failed"],
+        next_cursor=page.next_cursor,
+        items=results,
     )
 
 

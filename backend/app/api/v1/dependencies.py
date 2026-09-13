@@ -25,6 +25,7 @@ from app.connectors.postgres.queries import ReadQueries
 from app.connectors.postgres.tokens import SqlAlchemyTokenStore
 from app.connectors.postgres.users import SqlAlchemyUserStore
 from app.connectors.qdrant import QdrantLanguageRepository, QdrantVectorRepository
+from app.connectors.s3 import BlackGlassS3Source
 from app.core.config import Settings
 from app.core.errors import ServiceUnavailableError
 from app.domain.identity import DecisionThresholds
@@ -57,6 +58,14 @@ def get_dhivehi_ai_client(request: Request) -> DhivehiAIClient:
     if not isinstance(client, DhivehiAIClient):
         raise ServiceUnavailableError("specialist Dhivehi AI is not configured")
     return client
+
+
+def get_blackglass_s3_source(request: Request) -> BlackGlassS3Source:
+    """Return the optional read-only BlackGlass AWS source."""
+    source = getattr(request.app.state, "blackglass_s3", None)
+    if not isinstance(source, BlackGlassS3Source):
+        raise ServiceUnavailableError("the BlackGlass AWS source is not configured")
+    return source
 
 
 async def get_enrolment_service(request: Request) -> AsyncIterator[EnrolmentService]:

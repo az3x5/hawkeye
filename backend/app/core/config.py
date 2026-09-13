@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, RedisDsn, model_validator
+from pydantic import AliasChoices, Field, PostgresDsn, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -62,6 +62,46 @@ class Settings(BaseSettings):
     s3_use_path_style: bool = Field(
         default=True,
         description="Path-style addressing. True for MinIO, false for AWS S3.",
+    )
+
+    # External BlackGlass source bucket. These credentials are deliberately
+    # separate from FACEID_S3_*: the latter writes EagleEye-owned media,
+    # whereas this principal must be read-only over the upstream AWS bucket.
+    blackglass_aws_region: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "FACEID_BLACKGLASS_AWS_REGION", "AWS_DEFAULT_REGION", "blackglass_aws_region"
+        ),
+    )
+    blackglass_s3_bucket: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "FACEID_BLACKGLASS_S3_BUCKET", "AWS_BUCKET", "blackglass_s3_bucket"
+        ),
+    )
+    blackglass_s3_prefix: str = Field(
+        default="persons/",
+        min_length=1,
+        validation_alias=AliasChoices(
+            "FACEID_BLACKGLASS_S3_PREFIX", "AWS_PREFIX", "blackglass_s3_prefix"
+        ),
+    )
+    blackglass_aws_access_key_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "FACEID_BLACKGLASS_AWS_ACCESS_KEY_ID",
+            "AWS_ACCESS_KEY_ID",
+            "blackglass_aws_access_key_id",
+        ),
+    )
+    blackglass_aws_secret_access_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "FACEID_BLACKGLASS_AWS_SECRET_ACCESS_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "blackglass_aws_secret_access_key",
+        ),
+        repr=False,
     )
 
     # Upload ceiling for media ingestion. Enforced while reading the request
