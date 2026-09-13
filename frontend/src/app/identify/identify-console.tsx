@@ -28,6 +28,9 @@ export function IdentifyConsole() {
   const [result, setResult] = useState<IdentifyResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Unsupervised by default: attesting is a deliberate act, and a checkbox
+  // nobody touched must never be read as a claim about what happened.
+  const [supervised, setSupervised] = useState(false);
 
   // Derived during render; the effect only revokes, which is the external
   // resource this component is actually responsible for. Object URLs leak
@@ -48,6 +51,7 @@ export function IdentifyConsole() {
     setBusy(true);
     const body = new FormData();
     body.append("image", file);
+    body.append("capture_assurance", supervised ? "supervised" : "unsupervised");
     const outcome = await identifyAction(body);
     setResult(outcome);
     setBusy(false);
@@ -57,6 +61,7 @@ export function IdentifyConsole() {
   function reset() {
     setFile(null);
     setResult(null);
+    setSupervised(false);
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -106,6 +111,19 @@ export function IdentifyConsole() {
             {file.name} · {(file.size / 1024).toFixed(0)} kB
           </p>
         ) : null}
+
+        <label className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-ink-muted">
+          <input
+            type="checkbox"
+            checked={supervised}
+            onChange={(event) => setSupervised(event.target.checked)}
+            className="mt-0.5 size-4 shrink-0 accent-accent"
+          />
+          <span>
+            I observed this capture live. Without this, the system cannot tell a face from
+            a photograph of one, so the result is held for review however well it scores.
+          </span>
+        </label>
 
         <div className="mt-3 flex gap-2">
           <button

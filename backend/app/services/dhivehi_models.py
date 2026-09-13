@@ -239,8 +239,7 @@ class DhivehiModelRuntime:
             "sentences unless the user explicitly requests detail. Never restate the question. "
             "If a term is unclear, ask one short clarification question. Distinguish facts from "
             "inference, never invent intelligence records or claim access to data not included in "
-            "the conversation, and say when evidence is insufficient. "
-            + language_instruction
+            "the conversation, and say when evidence is insufficient. " + language_instruction
         )
         try:
             response = httpx.post(

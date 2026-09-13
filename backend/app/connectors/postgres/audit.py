@@ -17,6 +17,7 @@ from app.connectors.postgres.tables import audit_events, identifications
 from app.domain.audit import Actor, AuditAction, AuditEvent
 from app.domain.identity import (
     Candidate,
+    CaptureAssurance,
     DecisionOutcome,
     DecisionThresholds,
     IdentityDecision,
@@ -114,6 +115,7 @@ class SqlAlchemyIdentificationStore:
                 review_at=decision.thresholds.review_at,
                 best_person_uuid=best.person_uuid if best else None,
                 best_score=best.score if best else None,
+                capture_assurance=decision.assurance.value,
                 candidates=json.loads(
                     json.dumps([asdict(c) for c in decision.candidates], default=str)
                 ),
@@ -144,6 +146,7 @@ class SqlAlchemyIdentificationStore:
                     review_at=row.review_at,
                     policy_version=row.policy_version,
                 ),
+                assurance=CaptureAssurance(row.capture_assurance),
                 candidates=tuple(
                     Candidate(
                         person_uuid=UUID(c["person_uuid"]),

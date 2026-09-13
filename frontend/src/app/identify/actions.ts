@@ -1,7 +1,18 @@
 "use server";
 
 import { ApiError, NotAuthenticatedError, submitIdentification, submitLiveFrame } from "@/lib/api";
-import type { Identification, LiveFrameAnalysis } from "@/lib/types";
+import type { CaptureAssurance, Identification, LiveFrameAnalysis } from "@/lib/types";
+
+/**
+ * Read the operator's attestation off the form.
+ *
+ * Anything other than an explicit "supervised" is unsupervised: a missing,
+ * unexpected or malformed value must not be read as a claim that somebody
+ * watched the capture happen.
+ */
+function readAssurance(formData: FormData): CaptureAssurance {
+  return formData.get("capture_assurance") === "supervised" ? "supervised" : "unsupervised";
+}
 
 /**
  * The outcome of an identification attempt, as the browser sees it.
@@ -21,7 +32,10 @@ export async function identifyAction(formData: FormData): Promise<IdentifyResult
   }
 
   try {
-    return { ok: true, identification: await submitIdentification(image) };
+    return {
+      ok: true,
+      identification: await submitIdentification(image, readAssurance(formData)),
+    };
   } catch (error) {
     if (error instanceof NotAuthenticatedError) {
       return {
@@ -57,7 +71,7 @@ export async function analyzeLiveFrameAction(formData: FormData): Promise<LiveFr
     return { ok: false, code: "no_image", message: "The live frame was empty." };
   }
   try {
-    return { ok: true, analysis: await submitLiveFrame(image) };
+    return { ok: true, analysis: await submitLiveFrame(image, readAssurance(formData)) };
   } catch (error) {
     if (error instanceof NotAuthenticatedError) {
       return {

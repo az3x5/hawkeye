@@ -10,6 +10,7 @@ import { readToken } from "./session";
 import type {
   Account,
   ApiErrorBody,
+  CaptureAssurance,
   AuditPage,
   BotMessage,
   BotResponseLanguage,
@@ -298,12 +299,16 @@ export async function signOut(): Promise<void> {
  * credential never reaches the browser. The image itself is forwarded straight
  * through and not retained here.
  */
-export async function submitIdentification(image: File): Promise<Identification> {
+export async function submitIdentification(
+  image: File,
+  assurance: CaptureAssurance = "unsupervised",
+): Promise<Identification> {
   const token = await readToken();
   if (token === null) throw new NotAuthenticatedError();
 
   const body = new FormData();
   body.append("image", image);
+  body.append("capture_assurance", assurance);
 
   const response = await fetch(`${apiBaseUrl()}/api/v1/identifications`, {
     method: "POST",
@@ -323,12 +328,16 @@ export async function submitIdentification(image: File): Promise<Identification>
 }
 
 /** Analyze every face in one motion-triggered live-source frame. */
-export async function submitLiveFrame(image: File): Promise<LiveFrameAnalysis> {
+export async function submitLiveFrame(
+  image: File,
+  assurance: CaptureAssurance = "unsupervised",
+): Promise<LiveFrameAnalysis> {
   const token = await readToken();
   if (token === null) throw new NotAuthenticatedError();
 
   const body = new FormData();
   body.append("image", image);
+  body.append("capture_assurance", assurance);
   const response = await fetch(`${apiBaseUrl()}/api/v1/live/frames/analyze`, {
     method: "POST",
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },

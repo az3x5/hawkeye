@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import (
@@ -21,6 +21,7 @@ from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
 from app.domain.identity import (
     Candidate,
+    CaptureAssurance,
     DecisionOutcome,
     IdentificationStore,
     IdentityDecision,
@@ -96,6 +97,19 @@ class IdentificationResponse(BaseModel):
         default=None,
         description="Gap between the top two candidates; null when fewer than two.",
     )
+    capture_assurance: CaptureAssurance = Field(
+        default=CaptureAssurance.UNSUPERVISED,
+        description="What was attested about the provenance of the submitted image.",
+    )
+    capped_by_assurance: bool = Field(
+        default=False,
+        description=(
+            "True when the score cleared the accept threshold but the capture "
+            "was unsupervised, so a human was asked instead. The system has no "
+            "presentation-attack detection: an unsupervised image may be a "
+            "photograph of a photograph."
+        ),
+    )
     review_outcome: ReviewOutcome | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
@@ -156,6 +170,8 @@ def _decision_response(
         ),
         candidates=[_candidate(c) for c in decision.candidates],
         margin=decision.margin,
+        capture_assurance=decision.assurance,
+        capped_by_assurance=decision.capped_by_assurance,
         **review,  # type: ignore[arg-type]
     )
 
@@ -189,6 +205,7 @@ async def create_identification(
         Principal,
         Depends(rate_limited(Scope.IDENTIFY, "identify", lambda s: s.rate_limit_identify)),
     ],
+    capture_assurance: Annotated[CaptureAssurance, Form()] = CaptureAssurance.UNSUPERVISED,
 ) -> IdentificationResponse:
     """Propose who a face belongs to, and record the attempt.
 
@@ -202,6 +219,7 @@ async def create_identification(
             await service.embed_query(data),
             query_bytes=data,
             actor=principal.as_actor(),
+            assurance=capture_assurance,
         )
     except IdentificationError as exc:
         raise IdentificationFailedError(str(exc)) from exc
@@ -228,6 +246,7 @@ async def analyze_live_frame(
         Principal,
         Depends(rate_limited(Scope.IDENTIFY, "live-identify", lambda s: s.rate_limit_identify)),
     ],
+    capture_assurance: Annotated[CaptureAssurance, Form()] = CaptureAssurance.UNSUPERVISED,
 ) -> LiveFrameAnalysisResponse:
     """Locate and independently identify every face in a submitted frame.
 
@@ -244,6 +263,7 @@ async def analyze_live_frame(
                 face.embedding,
                 query_bytes=data,
                 actor=principal.as_actor(),
+                assurance=capture_assurance,
             )
             faces.append(
                 LiveFaceResponse(

@@ -100,7 +100,9 @@ class ApiError(Exception):
         self.message = message
 
 
-def _request(url: str, *, data: bytes | None, headers: dict[str, str], method: str) -> dict:
+def _request(
+    url: str, *, data: bytes | None, headers: dict[str, str], method: str
+) -> dict:
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -159,7 +161,9 @@ def enrol(api: str, token: str, source: str, row: Row) -> dict:
 
     for attempt in range(6):
         try:
-            return _request(f"{api}/api/v1/enrolments", data=body, headers=headers, method="POST")
+            return _request(
+                f"{api}/api/v1/enrolments", data=body, headers=headers, method="POST"
+            )
         except ApiError as error:
             # Rate limiting is the server pacing us, not a failure. Anything
             # else is the caller's problem and should surface immediately.
@@ -193,7 +197,9 @@ def read_manifest(manifest: Path, images: Path) -> list[Row]:
         # The second identifier is the API's `local_id`; manifests in the wild
         # call it either that or `nid`, and both mean the same thing here.
         nid_column = next((c for c in ("local_id", "nid") if c in columns), None)
-        missing = ({"id", "image"} - columns) | ({"local_id or nid"} if nid_column is None else set())
+        missing = ({"id", "image"} - columns) | (
+            {"local_id or nid"} if nid_column is None else set()
+        )
         if missing:
             raise SystemExit(
                 f"{manifest} is missing column(s): {', '.join(sorted(missing))}. "
@@ -204,17 +210,24 @@ def read_manifest(manifest: Path, images: Path) -> list[Row]:
             nid = (record[nid_column] or "").strip()
             name = (record["image"] or "").strip()
             if not (person_id and nid and name):
-                print(f"  row {number}: skipped, missing id, {nid_column} or image", file=sys.stderr)
+                print(
+                    f"  row {number}: skipped, missing id, {nid_column} or image",
+                    file=sys.stderr,
+                )
                 continue
             path = Path(name)
-            rows.append(Row(person_id, nid, path if path.is_absolute() else images / path))
+            rows.append(
+                Row(person_id, nid, path if path.is_absolute() else images / path)
+            )
     return rows
 
 
 def read_pattern(images: Path, pattern: str) -> list[Row]:
     """Read rows from filenames such as `{id}_{nid}`."""
-    expression = re.escape(pattern).replace(r"\{id\}", "(?P<id>[^/]+?)").replace(
-        r"\{nid\}", "(?P<nid>[^/]+?)"
+    expression = (
+        re.escape(pattern)
+        .replace(r"\{id\}", "(?P<id>[^/]+?)")
+        .replace(r"\{nid\}", "(?P<nid>[^/]+?)")
     )
     matcher = re.compile(f"^{expression}$")
 
@@ -224,7 +237,9 @@ def read_pattern(images: Path, pattern: str) -> list[Row]:
             continue
         found = matcher.match(path.stem)
         if found is None:
-            print(f"  {path.name}: skipped, does not match the pattern", file=sys.stderr)
+            print(
+                f"  {path.name}: skipped, does not match the pattern", file=sys.stderr
+            )
             continue
         rows.append(Row(found.group("id"), found.group("nid"), path))
     return rows
@@ -246,7 +261,13 @@ def import_one(api: str, token: str, source: str, row: Row) -> Result:
         # A conflict means these identifiers already denote different people.
         # That is a data problem worth seeing, not a transport failure.
         status = "conflict" if error.code == "conflicting_identifiers" else "error"
-        return Result(row.person_id, row.nid, str(row.image), status, detail=f"{error.code}: {error.message}")
+        return Result(
+            row.person_id,
+            row.nid,
+            str(row.image),
+            status,
+            detail=f"{error.code}: {error.message}",
+        )
 
     sample = response["sample"]
     return Result(
@@ -291,20 +312,42 @@ def write_report(path: Path, results: list[Result]) -> None:
     with os.fdopen(handle, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(
-            ["id", "nid", "image", "status", "person_uuid", "face_sample_uuid", "detail"]
+            [
+                "id",
+                "nid",
+                "image",
+                "status",
+                "person_uuid",
+                "face_sample_uuid",
+                "detail",
+            ]
         )
         for r in results:
             writer.writerow(
-                [r.person_id, r.nid, r.image, r.status, r.person_uuid, r.face_sample_uuid, r.detail]
+                [
+                    r.person_id,
+                    r.nid,
+                    r.image,
+                    r.status,
+                    r.person_uuid,
+                    r.face_sample_uuid,
+                    r.detail,
+                ]
             )
 
 
 def main() -> int:
     """Parse arguments and run the import."""
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--api", required=True, help="e.g. http://100.74.113.94:8000")
-    parser.add_argument("--source", required=True, help="what system these identifiers come from")
-    parser.add_argument("--images", type=Path, required=True, help="directory holding the images")
+    parser.add_argument(
+        "--source", required=True, help="what system these identifiers come from"
+    )
+    parser.add_argument(
+        "--images", type=Path, required=True, help="directory holding the images"
+    )
     parser.add_argument(
         "--manifest", type=Path, help="CSV with id, local_id (or nid) and image columns"
     )
@@ -315,12 +358,24 @@ def main() -> int:
         default=os.environ.get("HAWKEYE_PASSWORD"),
         help="prefer the HAWKEYE_PASSWORD environment variable to keep it out of shell history",
     )
-    parser.add_argument("--token", default=os.environ.get("HAWKEYE_TOKEN"), help="instead of email and password")
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("HAWKEYE_TOKEN"),
+        help="instead of email and password",
+    )
     parser.add_argument("--report", type=Path, default=Path("import-report.csv"))
     parser.add_argument("--workers", type=int, default=4, help="parallel uploads")
-    parser.add_argument("--wait", type=int, default=180, help="seconds to wait for embedding; 0 to skip")
-    parser.add_argument("--limit", type=int, help="import only the first N rows, for a trial run")
-    parser.add_argument("--dry-run", action="store_true", help="read the input and report, upload nothing")
+    parser.add_argument(
+        "--wait", type=int, default=180, help="seconds to wait for embedding; 0 to skip"
+    )
+    parser.add_argument(
+        "--limit", type=int, help="import only the first N rows, for a trial run"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="read the input and report, upload nothing",
+    )
     args = parser.parse_args()
 
     if bool(args.manifest) == bool(args.pattern):
@@ -328,8 +383,14 @@ def main() -> int:
     if not args.images.is_dir():
         parser.error(f"--images {args.images} is not a directory")
 
-    print(f"reading {'manifest ' + str(args.manifest) if args.manifest else 'filenames'}…")
-    rows = read_manifest(args.manifest, args.images) if args.manifest else read_pattern(args.images, args.pattern)
+    print(
+        f"reading {'manifest ' + str(args.manifest) if args.manifest else 'filenames'}…"
+    )
+    rows = (
+        read_manifest(args.manifest, args.images)
+        if args.manifest
+        else read_pattern(args.images, args.pattern)
+    )
     if args.limit:
         rows = rows[: args.limit]
     if not rows:
@@ -341,7 +402,9 @@ def main() -> int:
 
     if args.dry_run:
         for row in rows[:10]:
-            print(f"  would enrol id={row.person_id} nid={mask(row.nid)} {row.image.name}")
+            print(
+                f"  would enrol id={row.person_id} nid={mask(row.nid)} {row.image.name}"
+            )
         if len(rows) > 10:
             print(f"  … and {len(rows) - 10} more")
         return 0
@@ -349,7 +412,9 @@ def main() -> int:
     token = args.token
     if not token:
         if not (args.email and args.password):
-            parser.error("give --token, or --email and --password (or HAWKEYE_PASSWORD)")
+            parser.error(
+                "give --token, or --email and --password (or HAWKEYE_PASSWORD)"
+            )
         try:
             token = sign_in(args.api, args.email, args.password)
         except ApiError as error:
@@ -360,11 +425,14 @@ def main() -> int:
     results: list[Result] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for done, result in enumerate(
-            pool.map(lambda row: import_one(args.api, token, args.source, row), rows), start=1
+            pool.map(lambda row: import_one(args.api, token, args.source, row), rows),
+            start=1,
         ):
             results.append(result)
             if result.status in {"error", "conflict", "missing_image"}:
-                print(f"  [{done}/{len(rows)}] id={result.person_id} {result.status}: {result.detail}")
+                print(
+                    f"  [{done}/{len(rows)}] id={result.person_id} {result.status}: {result.detail}"
+                )
             elif done % 25 == 0 or done == len(rows):
                 print(f"  [{done}/{len(rows)}]")
 
@@ -383,7 +451,11 @@ def main() -> int:
 
     # A non-zero exit when anything needs a human, so a scripted import fails
     # loudly rather than looking successful.
-    return 1 if {"error", "conflict", "failed", "missing_image"} & totals.counts.keys() else 0
+    return (
+        1
+        if {"error", "conflict", "failed", "missing_image"} & totals.counts.keys()
+        else 0
+    )
 
 
 if __name__ == "__main__":
