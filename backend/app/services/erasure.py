@@ -178,6 +178,26 @@ async def reconcile_orphaned_vectors(
 #: it, so a shorter window would race live work and delete an image the worker
 #: is about to need.
 ORPHANED_IMAGE_GRACE_SECONDS = 3600
+# asyncpg rejects more than 32,767 bind arguments. Reconciliation can see one
+# digest per enrolled image, so keep each IN query comfortably below that
+# protocol ceiling instead of coupling correctness to the size of the corpus.
+ORPHANED_IMAGE_QUERY_BATCH_SIZE = 10_000
+
+
+async def _referenced_image_digests(session: AsyncSession, stored: list[str]) -> set[str]:
+    """Return referenced digests using bounded PostgreSQL argument batches."""
+    referenced: set[str] = set()
+    for start in range(0, len(stored), ORPHANED_IMAGE_QUERY_BATCH_SIZE):
+        batch = stored[start : start + ORPHANED_IMAGE_QUERY_BATCH_SIZE]
+        enrolled = await session.execute(
+            select(face_samples.c.image_sha256).where(face_samples.c.image_sha256.in_(batch))
+        )
+        queried = await session.execute(
+            select(identifications.c.query_sha256).where(identifications.c.query_sha256.in_(batch))
+        )
+        referenced.update(row.image_sha256 for row in enrolled.all())
+        referenced.update(row.query_sha256 for row in queried.all())
+    return referenced
 
 
 async def reconcile_orphaned_images(
@@ -207,15 +227,7 @@ async def reconcile_orphaned_images(
     if not stored:
         return 0
 
-    enrolled = await session.execute(
-        select(face_samples.c.image_sha256).where(face_samples.c.image_sha256.in_(stored))
-    )
-    queried = await session.execute(
-        select(identifications.c.query_sha256).where(identifications.c.query_sha256.in_(stored))
-    )
-    referenced = {row.image_sha256 for row in enrolled.all()} | {
-        row.query_sha256 for row in queried.all()
-    }
+    referenced = await _referenced_image_digests(session, stored)
 
     abandoned = [digest for digest in stored if digest not in referenced]
     if not abandoned:
