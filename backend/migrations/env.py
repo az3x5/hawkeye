@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
 from sqlalchemy.engine import Connection
@@ -28,6 +29,15 @@ config.set_main_option("sqlalchemy.url", _as_asyncpg_dsn(str(get_settings().post
 target_metadata = metadata
 
 
+def include_name(name: str | None, type_: str, parent_names: dict[str, Any]) -> bool:
+    """Inspect application schemas without managing unrelated database tables."""
+    if type_ == "schema":
+        return name in {None, "public", "media", "processing", "evidence"}
+    if type_ == "table":
+        return parent_names.get("schema_qualified_table_name") in metadata.tables
+    return True
+
+
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without connecting."""
     context.configure(
@@ -36,6 +46,8 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_schemas=True,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -43,7 +55,10 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations on an open connection."""
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection, target_metadata=target_metadata, compare_type=True,
+        include_schemas=True, include_name=include_name,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

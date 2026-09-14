@@ -13,6 +13,8 @@ from app.api.v1.administration import router as administration_router
 from app.api.v1.blackglass import router as blackglass_router
 from app.api.v1.browse import router as browse_router
 from app.api.v1.enrolments import router as enrolment_router
+from app.api.v1.evidence import router as evidence_router
+from app.api.v1.evidence import search_router as evidence_search_router
 from app.api.v1.health import router as health_router
 from app.api.v1.identifications import router as identification_router
 from app.api.v1.language import router as language_router
@@ -237,6 +239,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(administration_router, prefix=settings.api_v1_prefix)
     app.include_router(browse_router, prefix=settings.api_v1_prefix)
     app.include_router(blackglass_router, prefix=settings.api_v1_prefix)
+    app.include_router(evidence_router, prefix=settings.api_v1_prefix)
+    app.include_router(evidence_search_router, prefix=settings.api_v1_prefix)
     return app
 
 

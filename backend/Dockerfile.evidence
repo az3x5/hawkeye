@@ -1,0 +1,11 @@
+# Isolate document/audio/video decoders from the existing API image.
+ARG API_IMAGE=hawkeye-api:dev
+FROM ${API_IMAGE}
+USER root
+RUN apt-get update && apt-get install --no-install-recommends -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir 'pypdf>=5,<7' 'faster-whisper>=1.1,<2'
+COPY app /srv/app
+COPY migrations /srv/migrations
+USER faceid
+CMD ["python", "-m", "app.evidence_worker"]

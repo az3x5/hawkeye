@@ -26,6 +26,10 @@ const READABLE = [
   /^system\/metrics$/,
   /^media$/,
   /^integrations\/blackglass\/capabilities$/,
+  /^integrations\/blackglass\/evidence\/[0-9a-f-]{36}(\/(content|report))?$/,
+  /^integrations\/blackglass\/evidence\/events$/,
+  /^integrations\/blackglass\/evidence\/status$/,
+  /^integrations\/blackglass\/evidence-search$/,
 ];
 
 const WRITABLE = [
@@ -34,6 +38,7 @@ const WRITABLE = [
   /^nlp\/ocr$/,
   /^media$/,
   /^integrations\/blackglass\/(media|text)$/,
+  /^integrations\/blackglass\/evidence\/(media|text)$/,
 ];
 
 const MAX_BROWSER_MEDIA_BYTES = 50 * 1024 * 1024;
@@ -55,7 +60,7 @@ function refuse(): NextResponse {
 async function forward(request: Request, path: string, allowed: RegExp[]): Promise<Response> {
   if (!allowed.some((pattern) => pattern.test(path))) return refuse();
 
-  const isBrowserMedia = path === "media" || path === "integrations/blackglass/media";
+  const isBrowserMedia = path === "media" || path === "integrations/blackglass/media" || path.startsWith("integrations/blackglass/evidence/");
   if (request.method === "POST" && isBrowserMedia) {
     let sameHost = false;
     try {
@@ -127,6 +132,9 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
   const headers = new Headers();
   const upstreamContentType = upstream.headers.get("content-type");
   if (upstreamContentType !== null) headers.set("content-type", upstreamContentType);
+  const disposition = upstream.headers.get("content-disposition");
+  if (disposition !== null) headers.set("content-disposition", disposition);
+  headers.set("x-content-type-options", "nosniff");
   // Biometric images must not linger in shared caches.
   headers.set("cache-control", "private, no-store");
 

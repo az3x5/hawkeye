@@ -1,0 +1,50 @@
+# Add to the existing compose files; workers are explicitly opt-in.
+services:
+  evidence-worker: &evidence-worker
+    profiles: [evidence]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.evidence
+      args:
+        API_IMAGE: ${EVIDENCE_API_IMAGE:-hawkeye-api:dev}
+    image: eagleeye-evidence:local
+    env_file: [.env]
+    environment: &evidence-environment
+      FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FACEID_REDIS_DSN: redis://redis:6379/0
+      FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_DHIVEHI_AI_URL: http://dhivehi-ai:8010
+      FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-alakxender/e5-dhivehi-combined-mnr}
+      FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-65ead4fb4e6c5f72ef08eeed13eb2006bfa5f7ad}
+      FACEID_LANGUAGE_EMBEDDING_DEVICE: cpu
+      FACEID_LANGUAGE_EMBEDDING_BATCH_SIZE: "8"
+      OMP_NUM_THREADS: "4"
+      HF_HOME: /srv/model-cache
+      EVIDENCE_DELIVERY_ENABLED: "false"
+    volumes:
+      - object-data:/srv/objects
+      - language-model-cache-v2:/srv/model-cache
+      - eagleeye-media-demo-cache:/cache:ro
+    networks: [faceid]
+    cpus: 4
+    mem_limit: 8g
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    stop_grace_period: 65s
+    depends_on:
+      postgres: {condition: service_healthy}
+      qdrant: {condition: service_started}
+  evidence-delivery:
+    <<: *evidence-worker
+    profiles: [evidence-delivery]
+    command: [python, -m, app.evidence_worker, --delivery]
+    environment:
+      <<: *evidence-environment
+      EVIDENCE_DELIVERY_ENABLED: ${EVIDENCE_DELIVERY_ENABLED:-false}
+    cpus: 1
+    mem_limit: 2g
+volumes:
+  eagleeye-media-demo-cache:
+    external: true
