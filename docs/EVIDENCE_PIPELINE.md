@@ -181,6 +181,15 @@ The payload also contains `report`, a BlackGlass-compatible schema-2 report with
 insufficient; they are never completed from speculation. `document.evidenceRefs`
 links every included extract to its locator and processing provenance.
 
+Report analysis covers every extracted evidence piece in bounded batches. Each
+generated observation declares its report section, confidence, basis and exact
+post citation. Behaviour and routines require repeated observations. Identity
+requires an explicit account field, identifier or self-identification rather
+than appearance. Associations require a cited mention, reply, tag, shared event
+or interaction. Risk and suspicious-activity sections describe cited indicators
+and never label a person. Absence of a cited indicator is not treated as proof
+that an indicator was checked or absent. Findings remain unreviewed.
+
 ```http
 Authorization: Bearer <separate-BlackGlass-receiver-token>
 Idempotency-Key: <event_id>

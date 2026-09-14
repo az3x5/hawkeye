@@ -14,6 +14,28 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 PIPELINE = "evidence_analysis"
 PIPELINE_VERSION = "1.0"
 DELIVERY_PIPELINE = "evidence_delivery"
+ReportSection = Literal[
+    "osp-profile-summary",
+    "osp-key-findings",
+    "osp-identity-photo",
+    "osp-platform-snapshot",
+    "osp-username-evolution",
+    "osp-public-info",
+    "osp-behaviour-pattern",
+    "osp-routines",
+    "osp-communication-style",
+    "osp-decision-risk",
+    "osp-triggers",
+    "osp-privacy-contradictions",
+    "osp-behaviour-timeline",
+    "osp-associates",
+    "osp-data-exposure",
+    "osp-risky-behaviour",
+    "osp-crypto-footprint",
+    "osp-screening",
+    "osp-integrated-profile",
+    "osp-confidence-gaps",
+]
 
 
 class Contract(BaseModel):
@@ -140,6 +162,9 @@ class Finding(Contract):
     """A model assertion; citation validation alone does not establish truth."""
 
     statement: str = Field(min_length=1, max_length=2000)
+    section: ReportSection = "osp-key-findings"
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    basis: Literal["explicit", "repeated_observation", "association", "risk_indicator"] = "explicit"
     citations: list[Citation] = Field(min_length=1, max_length=8)
     review_status: Literal["unreviewed"] = "unreviewed"
 

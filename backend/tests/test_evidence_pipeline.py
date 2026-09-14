@@ -104,6 +104,9 @@ def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
             "findings": [
                 {
                     "statement": "Cited finding",
+                    "section": "osp-associates",
+                    "confidence": 0.8,
+                    "basis": "association",
                     "review_status": "unreviewed",
                     "citations": [{"evidence_id": evidence_id, "quote": "Source quote"}],
                 }
@@ -116,7 +119,7 @@ def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
     assert data["document"]["schema"] == 2
     assert len(data["blocks"]) == len(SECTIONS) == 31
     assert data["document"]["evidenceRefs"][0]["evidenceId"] == str(evidence_id)
-    key_findings = next(block for block in data["blocks"] if block["type"] == "osp-key-findings")
+    key_findings = next(block for block in data["blocks"] if block["type"] == "osp-associates")
     assert key_findings["rows"][0][0]["en"] == "Cited finding"
     unsupported = next(block for block in data["blocks"] if block["type"] == "osp-triggers")
     assert "Insufficient cited evidence" in unsupported["body"]["en"]
@@ -173,7 +176,25 @@ async def test_llm_failure_keeps_source_and_reports_partial_stage(monkeypatch) -
     items, result = await processor.process(uuid4(), body, text=body.text)
     assert items[0].original_text == body.text
     assert result["findings"] == []
-    assert result["warnings"][0]["code"] == "model_failed_or_citations_rejected"
+    assert result["warnings"][0]["code"] == "batch_1_failed_or_citations_rejected"
+
+
+async def test_report_analysis_reads_every_extracted_post_chunk(monkeypatch) -> None:
+    body = submission().model_copy(update={"options": AnalysisOptions(summarize=True)})
+    body.text = "\n".join(f"post {index}: " + "evidence " * 180 for index in range(15))
+    processor = EvidenceProcessor(None, EvidenceSettings())
+    batch_sizes = []
+
+    async def summary(*args: Any, **kwargs: Any) -> dict[str, str]:
+        messages = args[1]
+        batch_sizes.append(len(__import__("json").loads(messages[1]["content"])))
+        return {"text": '{"findings":[],"contradictions":[]}', "model": "test", "revision": "1"}
+
+    monkeypatch.setattr(processor, "ollama", summary)
+    items, result = await processor.process(uuid4(), body, text=body.text)
+    assert len(items) > 12
+    assert sum(batch_sizes) == len(items)
+    assert result["summary_provenance"]["pieces_considered"] == str(len(items))
 
 
 async def test_shared_source_is_read_only_and_validates_hash() -> None:
