@@ -108,6 +108,8 @@ class EvidenceRepository:
         return {
             "schema_version": "1.0",
             "analysis_id": record["analysis_id"],
+            "report_request_id": submission.report_request_id,
+            "subject": submission.subject.model_dump(mode="json") if submission.subject else None,
             "source": submission.source.model_dump(mode="json"),
             "status": record["status"],
             "created": created,
@@ -146,6 +148,13 @@ class EvidenceRepository:
         return {
             "schema_version": "1.0",
             "analysis_id": analysis_id,
+            "report_request_id": record["submission"].get("report_request_id"),
+            "subject": record["submission"].get("subject"),
+            "batch": {
+                "batch_id": record["submission"].get("batch_id"),
+                "batch_sequence": record["submission"].get("batch_sequence"),
+                "final_batch": record["submission"].get("final_batch", False),
+            },
             "source": record["submission"]["source"],
             "stream": record["submission"].get("stream"),
             "media_uuid": record["media_uuid"],
@@ -215,6 +224,13 @@ class EvidenceRepository:
             "event_type": "analysis.updated",
             "emitted_at": now.isoformat(),
             "analysis_id": str(analysis_id),
+            "report_request_id": row["submission"].get("report_request_id"),
+            "subject": row["submission"].get("subject"),
+            "batch": {
+                "batch_id": row["submission"].get("batch_id"),
+                "batch_sequence": row["submission"].get("batch_sequence"),
+                "final_batch": row["submission"].get("final_batch", False),
+            },
             "revision": revision,
             "status": status,
             "source": row["submission"]["source"],

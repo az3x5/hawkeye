@@ -47,6 +47,10 @@ def localized(en: str, dv: str = "") -> dict[str, str]:
 def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
     """Create a deterministic report; never add conclusions absent from the result."""
     source = analysis["source"]
+    subject = analysis.get("subject") or {}
+    subject_id = subject.get("subject_id", source["object_id"])
+    subject_type = subject.get("subject_type", source["object_type"])
+    subject_label = subject.get("display_label") or subject_id
     evidence = analysis.get("evidence", [])
     findings = analysis.get("findings", [])
     contradictions = analysis.get("contradictions", [])
@@ -139,9 +143,9 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
             "reference_prefix": "EE",
             "reference_serial": analysis_id[:8],
             "reference_year": analysis["updated_at"].year,
-            "subject": source["object_id"],
-            "subject_id": source["object_id"],
-            "subject_type": source["object_type"],
+            "subject": subject_label,
+            "subject_id": subject_id,
+            "subject_type": subject_type,
             "lang": "en",
             "status": "draft",
             "generation_status": "ready"
@@ -165,6 +169,7 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
                 "cover_profile_image_url": None,
                 "generation_options": {"citation_required": True},
                 "generator": {"system": "cyber-ai", "pipeline": "evidence_analysis"},
+                "report_request_id": analysis.get("report_request_id"),
             },
             "document": {
                 "schema": 2,
@@ -174,7 +179,7 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
                     "date": generated_at,
                     "focus": source["object_type"],
                     "purpose": "Evidence analysis",
-                    "subject": source["object_id"],
+                    "subject": subject_label,
                     "version": str(analysis["revision"]),
                     "profileImage": "",
                     "observationFrom": source.get("collected_at"),

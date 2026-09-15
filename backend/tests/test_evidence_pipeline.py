@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,7 @@ from fastapi import FastAPI
 from sqlalchemy import func, select, text
 
 from app.api.v1.evidence import router, search_router
+from app.connectors.filesystem import FilesystemBlobStore
 from app.connectors.postgres import PostgresConnector, SqlAlchemyProcessingJobRepository, metadata
 from app.connectors.postgres.evidence_tables import events, runs
 from app.connectors.postgres.processing_tables import processing_jobs
@@ -32,6 +34,7 @@ from app.domain.evidence import (
     SharedObject,
     StreamSegment,
     TextSubmission,
+    UnifiedSubmission,
     normalize,
     submission_key,
     validate_citations,
@@ -44,6 +47,7 @@ from app.services.evidence_source import SharedEvidenceSource
 from app.services.evidence_vectors import hybrid_search
 
 from .conftest import INTEGRATION_DSN, authenticate
+from .test_media_api import PNG_UPLOAD
 
 
 def submission(object_id: str = "record-1") -> TextSubmission:
@@ -67,6 +71,15 @@ def test_manifest_and_locator_validation() -> None:
         StreamSegment(stream_id="s", segment_id="c", sequence=1, started_at=datetime(2026, 1, 1))
     with pytest.raises(ValidationError):
         TextSubmission(**submission().model_dump(), ignored_processing_flag=True)
+    with pytest.raises(ValidationError):
+        UnifiedSubmission.model_validate(
+            {
+                **submission().model_dump(exclude={"text"}),
+                "report_request_id": "report-1",
+                "subject": {"subject_type": "social_profile", "subject_id": "profile-1"},
+                "text": "   ",
+            }
+        )
 
 
 def test_record_and_owner_are_part_of_idempotency() -> None:
@@ -76,6 +89,8 @@ def test_record_and_owner_are_part_of_idempotency() -> None:
     assert submission_key("a", original, "f" * 64) != submission_key(
         "a", submission("other"), "f" * 64
     )
+    replay = original.model_copy(update={"ingest_request_id": "retry-2"})
+    assert submission_key("a", original, "f" * 64) == submission_key("a", replay, "f" * 64)
 
 
 def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
@@ -354,6 +369,93 @@ async def test_http_ingestion_authentication_and_ownership(db, settings) -> None
         assert (await client.get(status_path)).json()["runs"] == {}
         assert (await client.get(path)).status_code == 404
         assert (await client.get(path + "/content")).status_code == 404
+
+
+async def test_unified_ingestion_accepts_text_and_files_and_replays(db, settings, tmp_path) -> None:
+    app = FastAPI()
+    app.state.postgres = db
+    app.state.settings = settings
+    app.state.blobs = FilesystemBlobStore(tmp_path / "objects")
+    app.include_router(router, prefix="/api/v1")
+    install_error_handlers(app)
+    authenticate(
+        app,
+        Scope.LANGUAGE,
+        Scope.MEDIA_WRITE,
+        Scope.MEDIA_READ,
+        subject="blackglass-service",
+        kind="service",
+    )
+    payload = {
+        "schema_version": "1.0",
+        "report_request_id": "BG-REPORT-123",
+        "subject": {
+            "subject_type": "social_profile",
+            "subject_id": "BG-PROFILE-456",
+            "display_label": "Profile under review",
+        },
+        "source": {
+            "system": "blackglass-prod",
+            "object_type": "post",
+            "object_id": "POST-1001",
+            "collected_at": "2026-09-15T08:00:00Z",
+        },
+        "text": "ދިވެހި post with an attached image",
+        "options": {"language": "mixed", "summarize": False},
+        "batch_id": "BG-REPORT-123-B1",
+        "batch_sequence": 1,
+        "final_batch": True,
+    }
+    endpoint = "/api/v1/integrations/blackglass/evidence/ingest"
+    request = {
+        "data": {"metadata": json.dumps(payload)},
+        "files": [("files", PNG_UPLOAD)],
+        "headers": {"Idempotency-Key": "BG-REPORT-123-B1"},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        first = await client.post(endpoint, **request)
+        assert first.status_code == 202, first.text
+        body = first.json()
+        assert body["accepted_items"] == 2
+        assert [item["kind"] for item in body["items"]] == ["text", "file"]
+        assert all(item["created"] for item in body["items"])
+        assert body["report_request_id"] == "BG-REPORT-123"
+        assert body["subject"]["subject_id"] == "BG-PROFILE-456"
+
+        replay = await client.post(endpoint, **request)
+        assert replay.status_code == 202, replay.text
+        assert not any(item["created"] for item in replay.json()["items"])
+        assert [item["analysis_id"] for item in replay.json()["items"]] == [
+            item["analysis_id"] for item in body["items"]
+        ]
+
+        result = await client.get(body["items"][0]["results_url"])
+        assert result.status_code == 200
+        assert result.json()["report_request_id"] == "BG-REPORT-123"
+        assert result.json()["subject"]["subject_id"] == "BG-PROFILE-456"
+        assert result.json()["batch"]["final_batch"] is True
+        report = await client.get(body["items"][0]["results_url"] + "/report")
+        assert report.json()["data"]["subject_id"] == "BG-PROFILE-456"
+        assert report.json()["data"]["subject"] == "Profile under review"
+
+        empty_payload = {
+            **payload,
+            "text": None,
+            "source": {**payload["source"], "object_id": "POST-2"},
+        }
+        empty = await client.post(
+            endpoint,
+            data={"metadata": json.dumps(empty_payload)},
+            headers={"Idempotency-Key": "empty-request"},
+        )
+        assert empty.status_code == 422
+
+    async with db.session() as session:
+        assert (
+            await session.execute(select(func.count()).select_from(processing_jobs))
+        ).scalar_one() == 2
 
 
 async def test_shared_manifest_does_not_create_media_copy(db) -> None:

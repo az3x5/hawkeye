@@ -8,21 +8,24 @@ started by any endpoint or worker described here.
 
 ## Original evidence storage
 
-For bulk AWS input, use **shared object manifests**. BlackGlass and EagleEye
-reference the same retained original; EagleEye stores no second original file.
-PostgreSQL holds extracted evidence and model provenance. Qdrant holds vectors.
-An embedding is not an archive of the source. This workflow has no S3 delete,
-copy, move, or lifecycle-policy mutation operation.
+The current deployment stores uploaded originals on the Cyber-AI PC. The API
+and evidence workers share the persistent Docker volume mounted at
+`/srv/objects`; set `OBJECT_STORE_BACKEND=filesystem` (the Compose default).
+PostgreSQL holds structured records, extraction provenance and queue state.
+Qdrant holds searchable vectors. An embedding is not an archive of its source,
+so the checksum-addressed original remains on Cyber-AI for citation review.
 
-Set `EVIDENCE_SOURCE_BUCKET` and a slash-terminated `EVIDENCE_SOURCE_PREFIX`
-(default prefix `blackglass/`) on both API and evidence worker. The bucket can
-default to the existing `AWS_BUCKET`. Existing AWS credential aliases remain
-supported. Grant read access to this prefix, including versioned object reads
-when version IDs are provided. Bucket retention/lifecycle must preserve every
-referenced original; this application does not override AWS lifecycle rules.
-Prefer immutable keys plus bucket versioning. Every read verifies byte size and
-SHA-256. Unversioned overwritten objects fail integrity validation rather than
-silently changing the evidence.
+BlackGlass normally sends text and attachments together to `/evidence/ingest`.
+The older `/evidence/text` and `/evidence/media` routes remain available for
+single-part clients. BlackGlass must not send local paths: file bytes cross the
+authenticated API connection and are committed to Cyber-AI before their item is
+acknowledged. Back up the `object-data` volume together with PostgreSQL;
+restoring only the database would leave report citations without originals.
+
+The `/evidence/objects` manifest endpoints are optional future adapters for an
+operator-configured shared S3 source. They are not part of the current Cyber-AI
+flow and reject submissions when that source is not configured. Enabling them
+later is a deliberate storage migration; it is not required for local upload.
 
 ## APIs implemented in this change
 
@@ -30,10 +33,11 @@ All paths begin `/api/v1/integrations/blackglass`.
 
 | Method/path | Permission | Purpose |
 | --- | --- | --- |
+| POST `/evidence/ingest` | `language` + `media:write` | Unified text and multi-file BlackGlass ingestion |
 | POST `/evidence/text` | `language` | Preserve text; enqueue evidence analysis |
 | POST `/evidence/media` | `media:write` | Multipart original upload for manual input |
-| POST `/evidence/objects` | `media:write` | Register one retained AWS original |
-| POST `/evidence/objects/batch` | `media:write` | Register up to 50 AWS manifests |
+| POST `/evidence/objects` | `media:write` | Optional future shared-object adapter; disabled when unconfigured |
+| POST `/evidence/objects/batch` | `media:write` | Optional future shared-object batch adapter |
 | GET `/evidence/{analysis_id}` | `media:read` | Source, processing state, excerpts, findings |
 | GET `/evidence/{analysis_id}/report` | `media:read` | BlackGlass schema-2 report JSON |
 | GET `/evidence/{analysis_id}/content` | `media:read` | Checksum-verified original download |
@@ -47,7 +51,72 @@ grant access to another account's content. Use a stable BlackGlass service
 subject across token rotation and issue it the required scopes. No automatic
 administrator cross-owner bypass is provided by these new endpoints.
 
-### Shared original manifest
+### Direct file upload to Cyber-AI
+
+The preferred BlackGlass endpoint is:
+
+```http
+POST /api/v1/integrations/blackglass/evidence/ingest
+Authorization: Bearer <EagleEye service token>
+Idempotency-Key: <stable BlackGlass request ID>
+Content-Type: multipart/form-data
+```
+
+The form has a required `metadata` JSON string and zero to twenty `files`
+parts. The metadata must include `report_request_id`, `subject`, and `source`;
+it may include `text`. At least text or one file is required. One request may
+carry both a post body and its attachments:
+
+```json
+{
+  "schema_version": "1.0",
+  "report_request_id": "BG-REPORT-123",
+  "subject": {
+    "subject_type": "social_profile",
+    "subject_id": "BG-PROFILE-456",
+    "display_label": "Profile under review"
+  },
+  "source": {
+    "system": "blackglass-prod",
+    "object_type": "post",
+    "object_id": "POST-1001",
+    "source_url": "https://blackglass.example/posts/POST-1001",
+    "collected_at": "2026-09-15T08:00:00Z"
+  },
+  "text": "Original post text",
+  "options": {
+    "language": "mixed",
+    "translate_to": "en",
+    "summarize": true
+  },
+  "batch_id": "BG-REPORT-123-BATCH-1",
+  "batch_sequence": 1,
+  "final_batch": false
+}
+```
+
+The 202 response contains an `items` array: one analysis acknowledgement for
+the text and one for each file. All items retain the same report request,
+subject, source and batch correlation. Exact replays converge on the same
+analysis IDs even if the HTTP request ID changes; the idempotency header is
+also stored as transport provenance. Per-file limit is 50 MiB, combined-file
+limit is 100 MiB. Earlier parts can already be committed if a later part is
+invalid or too large, so retry the complete request: committed items converge
+on their existing analysis IDs. Larger video must be sent as finite ordered
+segments.
+
+Send `multipart/form-data` to `/evidence/media` with:
+
+* `file`: the original image, audio, video or document bytes;
+* `metadata`: a JSON string containing the same `schema_version`, `source`,
+  `options`, and optional `stream` fields used by text ingestion.
+
+The acknowledgement is returned only after the original is durably stored and
+the database job is committed. The worker reads the same checksum-addressed
+file from the persistent Cyber-AI volume. Replaying the same source and bytes is
+idempotent.
+
+### Optional shared original manifest (not used now)
 
 ```json
 {
@@ -154,8 +223,8 @@ correctly; reviewers must inspect the retained original.
   inferred. Default 120 seconds / 6 frames; ceilings 600 seconds / 20 frames.
 * Translation/transliteration: existing specialist adapters. Quality on mixed
   informal Dhivehi is unverified. No speaker identity or diarization is claimed.
-* Summaries: first 12 evidence pieces maximum; a warning exposes incomplete
-  summary coverage. Up to 200 evidence pieces per run; truncation is explicit.
+* Summaries: every extracted evidence piece is considered in bounded batches of
+  twelve. Up to 200 evidence pieces per run; extraction truncation is explicit.
 
 Unsupported stages produce visible warnings or failure; installed model
 artifacts are not reported as tested language accuracy.
@@ -234,15 +303,17 @@ service account's analyses or mark model findings verified.
 
 Before bulk release, validate representative Dhivehi/English OCR, speech and
 translation against reviewed references; verify retrieval/citation support,
-shared-bucket permissions/retention, decoder limits, crash recovery, queue
+Cyber-AI volume capacity/backup, decoder limits, crash recovery, queue
 pressure, and the actual BlackGlass acknowledgement endpoint. A green unit test
 run is not this acceptance sign-off. No unattended notifications are enabled.
 
-### Verification checkpoint — 2026-09-14
+### Verification checkpoint — 2026-09-15
 
-* 16 isolated evidence integration tests passed against disposable PostgreSQL
-  and Qdrant, including owner isolation, checksum/source handling, worker result
-  publication, active heartbeat, delivery backfill and replay.
+* 19 isolated evidence integration tests passed against disposable PostgreSQL,
+  including unified text-plus-file ingestion, local storage, replay, owner
+  isolation, checksum/source handling, worker result publication, active
+  heartbeat, delivery backfill and replay. One optional Qdrant test was skipped
+  because that disposable endpoint was not started for this run.
 * 88 existing frontend tests passed; frontend typecheck and targeted ESLint passed.
 * Evidence Python lint and targeted type checking passed.
 * Decoder worker image built locally. Compose overlay validated against cyber-ai's

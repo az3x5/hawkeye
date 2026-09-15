@@ -13,6 +13,8 @@ services:
       FACEID_POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FACEID_REDIS_DSN: redis://redis:6379/0
       FACEID_QDRANT_URL: http://qdrant:6333
+      FACEID_OBJECT_STORE_ROOT: /srv/objects
+      FACEID_OBJECT_STORE_BACKEND: filesystem
       FACEID_DHIVEHI_AI_URL: http://dhivehi-ai:8010
       FACEID_LANGUAGE_EMBEDDING_MODEL: ${LANGUAGE_EMBEDDING_MODEL:-alakxender/e5-dhivehi-combined-mnr}
       FACEID_LANGUAGE_EMBEDDING_VERSION: ${LANGUAGE_EMBEDDING_VERSION:-65ead4fb4e6c5f72ef08eeed13eb2006bfa5f7ad}

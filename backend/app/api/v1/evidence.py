@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
@@ -29,6 +29,7 @@ from app.domain.evidence import (
     SharedObject,
     Submission,
     TextSubmission,
+    UnifiedSubmission,
 )
 from app.domain.media import MediaError, SourceType
 from app.domain.storage import ObjectLocation
@@ -40,6 +41,47 @@ from app.services.evidence_vectors import EvidenceVectors, hybrid_search
 from app.services.media import IngestRequest, MediaService
 
 router = APIRouter(prefix="/integrations/blackglass/evidence", tags=["evidence"])
+
+_MAX_UNIFIED_FILES = 20
+_MAX_UNIFIED_BYTES = 100 * 1024**2
+
+
+async def _store_media_submission(
+    *,
+    data: bytes,
+    declared_content_type: str | None,
+    body: Submission,
+    request: Request,
+    principal: Principal,
+) -> dict[str, Any]:
+    """Store one local original and atomically enqueue its evidence run."""
+    blobs = getattr(request.app.state, "blobs", None)
+    if blobs is None:
+        raise ServiceUnavailableError("media storage is not available")
+    async with _postgres(request).session() as session:
+        stored = await MediaService(
+            repository=SqlAlchemyMediaRepository(session),
+            blobs=blobs,
+            audit=SqlAlchemyAuditLog(session),
+            max_bytes=50 * 1024**2,
+        ).ingest(
+            IngestRequest(
+                data=data,
+                source_type=SourceType.BLACKGLASS,
+                source_system=body.source.system,
+                external_source_id=body.source.object_id,
+                declared_content_type=declared_content_type,
+                source_url=body.source.source_url,
+                collected_at=body.source.collected_at,
+                submitted_by=principal.subject,
+            )
+        )
+        return await EvidenceRepository(session).submit(
+            principal.subject,
+            body,
+            sha256=stored.asset.sha256,
+            media_uuid=stored.asset.media_uuid,
+        )
 
 
 @router.get("/status")
@@ -123,40 +165,95 @@ async def submit_media(
         body = Submission.model_validate_json(metadata)
     except ValidationError as exc:
         raise InvalidMediaError("invalid evidence metadata", field="metadata") from exc
-    blobs = getattr(request.app.state, "blobs", None)
-    if blobs is None:
-        raise ServiceUnavailableError("media storage is not available")
     settings = request.app.state.settings
     try:
         data = await read_bounded_upload(file, min(settings.media_max_upload_bytes, 50 * 1024**2))
-        async with _postgres(request).session() as session:
-            stored = await MediaService(
-                repository=SqlAlchemyMediaRepository(session),
-                blobs=blobs,
-                audit=SqlAlchemyAuditLog(session),
-                max_bytes=50 * 1024**2,
-            ).ingest(
-                IngestRequest(
-                    data=data,
-                    source_type=SourceType.BLACKGLASS,
-                    source_system=body.source.system,
-                    external_source_id=body.source.object_id,
-                    declared_content_type=file.content_type,
-                    source_url=body.source.source_url,
-                    collected_at=body.source.collected_at,
-                    submitted_by=principal.subject,
-                )
-            )
-            return await EvidenceRepository(session).submit(
-                principal.subject,
-                body,
-                sha256=stored.asset.sha256,
-                media_uuid=stored.asset.media_uuid,
-            )
+        return await _store_media_submission(
+            data=data,
+            declared_content_type=file.content_type,
+            body=body,
+            request=request,
+            principal=principal,
+        )
     except MediaTooLargeError as exc:
         raise MediaTooLargeResponseError(str(exc)) from exc
     except (UnsupportedMediaError, MediaError) as exc:
         raise InvalidMediaError(str(exc)) from exc
+
+
+@router.post("/ingest", status_code=202)
+async def unified_ingest(
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Scope.MEDIA_WRITE))],
+    metadata: Annotated[str, Form(max_length=16000)],
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=256),
+    ],
+    files: Annotated[list[UploadFile] | None, File()] = None,
+) -> dict[str, Any]:
+    """Accept a post's text and local attachments through one authenticated request."""
+    if not principal.has(Scope.LANGUAGE):
+        from app.api.v1.security import NotAuthorisedError
+
+        raise NotAuthorisedError("the unified endpoint requires the 'language' scope")
+    try:
+        body = UnifiedSubmission.model_validate_json(metadata).model_copy(
+            update={"ingest_request_id": idempotency_key}
+        )
+    except ValidationError as exc:
+        raise InvalidMediaError("invalid unified evidence metadata", field="metadata") from exc
+    uploads = files or []
+    if len(uploads) > _MAX_UNIFIED_FILES:
+        raise InvalidMediaError(f"at most {_MAX_UNIFIED_FILES} files are accepted per request")
+    if body.text is None and not uploads:
+        raise InvalidMediaError("provide text, one or more files, or both")
+
+    submission = Submission.model_validate(body.model_dump(exclude={"text"}))
+    results: list[dict[str, Any]] = []
+    if body.text is not None:
+        text_body = TextSubmission.model_validate({**submission.model_dump(), "text": body.text})
+        async with _postgres(request).session() as session:
+            accepted = await EvidenceRepository(session).submit(
+                principal.subject,
+                text_body,
+                sha256=content_hash(body.text.encode()),
+                text=body.text,
+            )
+        results.append({"kind": "text", "filename": None, **accepted})
+
+    total_bytes = 0
+    per_file_limit = min(request.app.state.settings.media_max_upload_bytes, 50 * 1024**2)
+    for upload in uploads:
+        try:
+            data = await read_bounded_upload(upload, per_file_limit)
+            total_bytes += len(data)
+            if total_bytes > _MAX_UNIFIED_BYTES:
+                raise MediaTooLargeError(
+                    f"combined files exceed the {_MAX_UNIFIED_BYTES}-byte request limit"
+                )
+            accepted = await _store_media_submission(
+                data=data,
+                declared_content_type=upload.content_type,
+                body=submission,
+                request=request,
+                principal=principal,
+            )
+            results.append({"kind": "file", "filename": upload.filename, **accepted})
+        except MediaTooLargeError as exc:
+            raise MediaTooLargeResponseError(str(exc)) from exc
+        except (UnsupportedMediaError, MediaError) as exc:
+            raise InvalidMediaError(str(exc), field=upload.filename or "files") from exc
+
+    return {
+        "schema_version": "1.0",
+        "request_id": idempotency_key,
+        "report_request_id": body.report_request_id,
+        "subject": body.subject.model_dump(mode="json"),
+        "source": body.source.model_dump(mode="json"),
+        "accepted_items": len(results),
+        "items": results,
+    }
 
 
 @router.get("/events")

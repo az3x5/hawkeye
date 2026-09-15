@@ -54,6 +54,14 @@ class EvidenceSource(Contract):
     collected_at: datetime | None = None
 
 
+class ReportSubject(Contract):
+    """BlackGlass subject used to correlate evidence into a future aggregate report."""
+
+    subject_type: Literal["social_profile", "person", "vehicle", "case", "other"]
+    subject_id: str = Field(min_length=1, max_length=256)
+    display_label: str | None = Field(default=None, max_length=512)
+
+
 class AnalysisOptions(Contract):
     """Bound the work requested for one evidence submission."""
 
@@ -89,12 +97,33 @@ class Submission(Contract):
     source: EvidenceSource
     options: AnalysisOptions = Field(default_factory=AnalysisOptions)
     stream: StreamSegment | None = None
+    report_request_id: str | None = Field(default=None, min_length=1, max_length=256)
+    subject: ReportSubject | None = None
+    batch_id: str | None = Field(default=None, min_length=1, max_length=256)
+    batch_sequence: int | None = Field(default=None, ge=0)
+    final_batch: bool = False
+    ingest_request_id: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class TextSubmission(Submission):
     """UTF-8 text is preserved exactly before normalization."""
 
     text: str = Field(min_length=1, max_length=100_000)
+
+
+class UnifiedSubmission(Submission):
+    """Metadata for one post and any files attached to that same source record."""
+
+    report_request_id: str = Field(min_length=1, max_length=256)
+    subject: ReportSubject
+    text: str | None = Field(default=None, max_length=100_000)
+
+    @model_validator(mode="after")
+    def text_must_not_be_blank(self) -> UnifiedSubmission:
+        """Treat omitted text differently from an accidental blank post body."""
+        if self.text is not None and not self.text.strip():
+            raise ValueError("text must contain non-whitespace content when provided")
+        return self
 
 
 class SharedObject(Contract):
@@ -196,7 +225,9 @@ def submission_key(owner: str, submission: Submission, sha256: str) -> str:
     """Keep identical content submitted for different BlackGlass records distinct."""
     value = {
         "owner": owner,
-        "submission": submission.model_dump(mode="json", exclude={"text"}),
+        # The HTTP request ID is transport replay metadata, not evidence
+        # identity. Token rotation or a retried sender must not duplicate a run.
+        "submission": submission.model_dump(mode="json", exclude={"text", "ingest_request_id"}),
         "sha256": sha256,
         "pipeline_version": PIPELINE_VERSION,
     }
