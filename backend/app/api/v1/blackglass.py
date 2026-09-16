@@ -14,10 +14,12 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    _postgres,
     get_blackglass_s3_source,
     get_enrolment_service,
     get_language_document_service,
@@ -34,6 +36,7 @@ from app.api.v1.media import (
 )
 from app.api.v1.security import require
 from app.connectors.postgres.queries import ReadQueries
+from app.connectors.postgres.tables import language_documents
 from app.connectors.s3 import BlackGlassS3Error, BlackGlassS3Source
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
@@ -44,10 +47,12 @@ from app.domain.content_types import (
     sniff,
     verify_declared,
 )
+from app.domain.evidence import AnalysisOptions, ReportSubject, TextSubmission
 from app.domain.jobs import ProcessingState
 from app.domain.media import Classification, MediaError, SourceType
 from app.domain.models import DomainValidationError
 from app.services.enrolment import EnrolmentError, EnrolmentRequest, EnrolmentService
+from app.services.evidence import EvidenceRepository, content_hash
 from app.services.language_search import DocumentSubmission, LanguageDocumentService
 from app.services.media import IngestRequest, MediaService
 
@@ -175,6 +180,21 @@ class BlackGlassDocumentPage(BaseModel):
     total: int
     limit: int
     offset: int
+    profiles: dict[str, int]
+
+
+class BlackGlassProfileNotFoundError(FaceIdError):
+    """No imported text belongs to the requested profile."""
+
+    status_code = status.HTTP_404_NOT_FOUND
+    code = "blackglass_profile_not_found"
+
+
+class BlackGlassProfileTooLargeError(FaceIdError):
+    """The complete profile corpus exceeds one bounded evidence run."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    code = "blackglass_profile_too_large"
 
 
 class BlackGlassCapabilityResponse(BaseModel):
@@ -701,4 +721,95 @@ async def list_blackglass_documents(
         total=page.total,
         limit=page.limit,
         offset=page.offset,
+        profiles=await queries.language_document_profile_counts(),
     )
+
+
+@router.post(
+    "/profiles/{profile_id}/analyze",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+)
+async def analyze_blackglass_profile(
+    profile_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Scope.MEDIA_WRITE))],
+) -> dict[str, Any]:
+    """Create one cited report run from every imported post for a profile."""
+    if not principal.has(Scope.LANGUAGE):
+        from app.api.v1.security import NotAuthorisedError
+
+        raise NotAuthorisedError("profile analysis requires the 'language' scope")
+    if not profile_id or len(profile_id) > 256:
+        raise BlackGlassProfileNotFoundError("profile not found")
+
+    async with _postgres(request).session() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        language_documents.c.source_id,
+                        language_documents.c.title,
+                        language_documents.c.original_text,
+                        language_documents.c.attributes,
+                        language_documents.c.created_at,
+                    )
+                    .where(language_documents.c.profile_id == profile_id)
+                    .order_by(language_documents.c.created_at, language_documents.c.source_id)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if not rows:
+            raise BlackGlassProfileNotFoundError("profile not found")
+
+        blocks = []
+        for row in rows:
+            attributes = dict(row["attributes"])
+            provenance = [f"source_id: {row['source_id']}"]
+            if published := attributes.get("published_at"):
+                provenance.append(f"published_at: {published}")
+            if source_url := attributes.get("source_url"):
+                provenance.append(f"source_url: {source_url}")
+            blocks.append(
+                "\n".join(
+                    [
+                        "[BLACKGLASS SOURCE]",
+                        *provenance,
+                        "text:",
+                        row["original_text"],
+                        "[/BLACKGLASS SOURCE]",
+                    ]
+                )
+            )
+        corpus = "\n\n".join(blocks)
+        if len(corpus) > 100_000:
+            raise BlackGlassProfileTooLargeError(
+                "profile text exceeds 100,000 characters; submit bounded report batches"
+            )
+
+        label = str(rows[0]["title"]).split(" — ", 1)[0][:512]
+        submission = TextSubmission(
+            source_id=profile_id,
+            source_type="profile_post_collection",
+            report_request_id=profile_id,
+            subject=ReportSubject(
+                subject_type="social_profile",
+                subject_id=profile_id,
+                display_label=label,
+            ),
+            attributes={
+                "source_system": "blackglass-prod",
+                "profile_id": profile_id,
+                "record_count": len(rows),
+            },
+            options=AnalysisOptions(language="mixed", summarize=True),
+            text=corpus,
+        )
+        return await EvidenceRepository(session).submit(
+            principal.subject,
+            submission,
+            sha256=content_hash(corpus.encode()),
+            text=corpus,
+        )

@@ -39,6 +39,7 @@ const WRITABLE = [
   /^nlp\/ocr$/,
   /^media$/,
   /^integrations\/blackglass\/(media|text)$/,
+  /^integrations\/blackglass\/profiles\/[^/]+\/analyze$/,
   /^integrations\/blackglass\/evidence\/(media|text)$/,
 ];
 

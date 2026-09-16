@@ -219,7 +219,7 @@ describe("proxy allowlist", () => {
 
   it("forwards the imported BlackGlass record page and profile filter", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ items: [], total: 0, limit: 25, offset: 0 }), {
+      new Response(JSON.stringify({ items: [], total: 0, limit: 25, offset: 0, profiles: {} }), {
         status: 200,
         headers: { "content-type": "application/json" },
       }),
@@ -240,6 +240,27 @@ describe("proxy allowlist", () => {
       Accept: "application/json",
       Authorization: "Bearer faceid_test-token",
     });
+  });
+
+  it("forwards a request to analyze one imported BlackGlass profile", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ analysis_id: "11111111-1111-4111-8111-111111111111" }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { POST } = await import("../../app/api/v1/[...path]/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/v1/integrations/blackglass/profiles/profile-1/analyze", { method: "POST" }),
+      { params: Promise.resolve({ path: ["integrations", "blackglass", "profiles", "profile-1", "analyze"] }) },
+    );
+
+    expect(response.status).toBe(202);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://api.test:8000/api/v1/integrations/blackglass/profiles/profile-1/analyze",
+    );
   });
 
   it("forwards the media list with its bounded query", async () => {

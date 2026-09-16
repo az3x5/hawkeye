@@ -26,7 +26,7 @@ type ImportedDocument = {
   attributes: Record<string, unknown>; created_at: string; processed_at: string | null;
 };
 type ImportedDocumentPage = {
-  items: ImportedDocument[]; total: number; limit: number; offset: number;
+  items: ImportedDocument[]; total: number; limit: number; offset: number; profiles: Record<string, number>;
 };
 const base = "/api/v1/integrations/blackglass/evidence";
 const documentsBase = "/api/v1/integrations/blackglass/documents";
@@ -59,6 +59,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
   const [profileFilter, setProfileFilter] = useState("");
   const [appliedProfile, setAppliedProfile] = useState("");
   const [documentOffset, setDocumentOffset] = useState(0);
+  const [profileAnalysisBusy, setProfileAnalysisBusy] = useState(false);
 
   useEffect(() => {
     let stopped = false;
@@ -154,6 +155,24 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Search failed."); }
   }
 
+  const profileIds = Object.keys(documents?.profiles ?? {});
+  const reportProfile = appliedProfile || (profileIds.length === 1 ? profileIds[0] : "");
+
+  async function analyzeProfile() {
+    if (!reportProfile) return setError("Filter to one profile before generating its report.");
+    setProfileAnalysisBusy(true); setError(""); setResult(null);
+    try {
+      const accepted = await readJson<{ analysis_id: string }>(
+        `/api/v1/integrations/blackglass/profiles/${encodeURIComponent(reportProfile)}/analyze`,
+        { method: "POST" },
+      );
+      setActive(accepted.analysis_id); setLookup(accepted.analysis_id);
+      setRefresh(value => value + 1);
+      setResult(await readJson<Result>(`${base}/${accepted.analysis_id}`));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Profile analysis could not be started."); }
+    finally { setProfileAnalysisBusy(false); }
+  }
+
   return <div className="space-y-6">
     {canText && <section className="panel space-y-4 p-6" aria-live="polite">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -166,6 +185,10 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
         </form>
       </div>
       {documentsError && <p className="text-sm text-red-400">{documentsError}</p>}
+      {canMedia && reportProfile && <div className="flex flex-wrap items-center gap-3 rounded border border-white/10 p-3">
+        <Button disabled={profileAnalysisBusy} onClick={() => void analyzeProfile()}>{profileAnalysisBusy ? "Starting report…" : "Generate profile report"}</Button>
+        <span className="text-xs text-ink-muted">Uses all {documents?.profiles[reportProfile] ?? 0} imported records for profile {reportProfile}.</span>
+      </div>}
       {documents?.items.length === 0 && <p className="text-sm text-ink-muted">No records match this filter.</p>}
       {documents && documents.items.length > 0 && <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
         <thead className="border-b border-white/15 text-xs text-ink-muted"><tr><th className="py-2 pr-3">Record</th><th className="py-2 pr-3">Profile</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">State</th><th className="py-2">Received</th></tr></thead>

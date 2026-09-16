@@ -398,6 +398,16 @@ class ReadQueries:
             offset=offset,
         )
 
+    async def language_document_profile_counts(self) -> dict[str, int]:
+        """Count imported text records by indexed profile identifier."""
+        rows = await self._session.execute(
+            select(language_documents.c.profile_id, func.count())
+            .where(language_documents.c.profile_id.is_not(None))
+            .group_by(language_documents.c.profile_id)
+            .order_by(language_documents.c.profile_id)
+        )
+        return {str(row[0]): int(row[1]) for row in rows.all()}
+
     async def statistics(self) -> Statistics:
         """Counts for the dashboard. Every figure comes from a real query."""
         persons_total = await self._session.scalar(select(func.count()).select_from(persons))
