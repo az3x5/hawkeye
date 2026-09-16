@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import httpx2
@@ -372,7 +373,7 @@ class TestBlackGlassMediaContract:
         assert "source" not in body
         assert body["subject"]["type"] == "language_document"
         assert body["analysis_routes"][0]["state"] == "queued"
-        request = client.app.state.language_service.request
+        request = cast("FastAPI", client.app).state.language_service.request
         assert request is not None
         assert request.attributes["source_id"] == "post-91"
         assert request.attributes["source_type"] == "post"
