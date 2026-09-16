@@ -45,12 +45,26 @@ class SqlAlchemyLanguageDocumentRepository:
 
     async def add(self, document: LanguageDocument) -> tuple[LanguageDocument, bool]:
         """Insert a document, converging repeated source/content submissions."""
+        source_id = str(
+            document.attributes.get("source_id")
+            or document.attributes.get("platform_object_id")
+            or document.content_sha256
+        )
+        source_type = str(
+            document.attributes.get("source_type")
+            or document.attributes.get("content_model")
+            or "text"
+        )
+        profile_id = document.attributes.get("profile_id")
         result = await self._session.execute(
             insert(language_documents)
             .values(
                 document_uuid=document.document_uuid,
                 title=document.title,
                 source=document.source,
+                source_id=source_id,
+                source_type=source_type,
+                profile_id=str(profile_id) if profile_id is not None else None,
                 original_text=document.original_text,
                 normalized_text=document.normalized_text,
                 primary_script=document.primary_script.value,

@@ -240,6 +240,9 @@ language_documents = Table(
     Column("document_uuid", PgUUID(as_uuid=True), primary_key=True),
     Column("title", String(256), nullable=False),
     Column("source", String(128), nullable=False),
+    Column("source_id", String(256), nullable=False),
+    Column("source_type", String(64), nullable=False),
+    Column("profile_id", String(256), nullable=True),
     Column("original_text", Text(), nullable=False),
     Column("normalized_text", Text(), nullable=False),
     Column("primary_script", String(16), nullable=False),
@@ -263,5 +266,7 @@ language_documents = Table(
     CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="ck_language_document_sha256"),
     Index("ix_language_documents_state", "processing_state"),
     Index("ix_language_documents_source", "source"),
+    Index("ix_language_documents_source_identity", "source", "source_type", "source_id"),
+    Index("ix_language_documents_profile_id", "profile_id"),
     comment="Text documents and model provenance for the semantic language index.",
 )

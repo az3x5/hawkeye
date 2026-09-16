@@ -266,6 +266,8 @@ class StatisticsResponse(BaseModel):
     awaiting_review: int
     reviews_recorded: int
     audit_events: int
+    language_documents: int
+    language_documents_by_state: dict[str, int]
 
 
 @router.get(

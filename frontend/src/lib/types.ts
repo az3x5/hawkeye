@@ -207,6 +207,8 @@ export interface Statistics {
   awaiting_review: number;
   reviews_recorded: number;
   audit_events: number;
+  language_documents: number;
+  language_documents_by_state: Record<string, number>;
 }
 
 export type ProcessingState = "pending" | "processed" | "failed";

@@ -20,7 +20,16 @@ type WorkflowStatus = {
   measured_at: string; runs: Record<string, number>; analysis_workers: number;
   delivery_workers: number; undelivered_events: number;
 };
+type ImportedDocument = {
+  document_uuid: string; source_id: string; source_type: string; profile_id: string | null;
+  title: string; source: string; primary_script: string; processing_state: string;
+  attributes: Record<string, unknown>; created_at: string; processed_at: string | null;
+};
+type ImportedDocumentPage = {
+  items: ImportedDocument[]; total: number; limit: number; offset: number;
+};
 const base = "/api/v1/integrations/blackglass/evidence";
+const documentsBase = "/api/v1/integrations/blackglass/documents";
 const field = "rounded border border-white/15 bg-black/10 p-3 text-sm";
 
 async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -45,6 +54,11 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Array<{ analysis_id: string; evidence: Piece }>>([]);
+  const [documents, setDocuments] = useState<ImportedDocumentPage | null>(null);
+  const [documentsError, setDocumentsError] = useState("");
+  const [profileFilter, setProfileFilter] = useState("");
+  const [appliedProfile, setAppliedProfile] = useState("");
+  const [documentOffset, setDocumentOffset] = useState(0);
 
   useEffect(() => {
     let stopped = false;
@@ -62,6 +76,26 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     void pollStatus();
     return () => { stopped = true; clearTimeout(timeout); };
   }, []);
+
+  useEffect(() => {
+    if (!canText) return;
+    let stopped = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    async function pollDocuments() {
+      const parameters = new URLSearchParams({ limit: "25", offset: String(documentOffset) });
+      if (appliedProfile) parameters.set("profile_id", appliedProfile);
+      try {
+        const page = await readJson<ImportedDocumentPage>(`${documentsBase}?${parameters}`);
+        if (!stopped) { setDocuments(page); setDocumentsError(""); }
+      } catch (caught) {
+        if (!stopped) setDocumentsError(caught instanceof Error ? caught.message : "Unable to load imported records.");
+      } finally {
+        if (!stopped) timeout = setTimeout(pollDocuments, 5000);
+      }
+    }
+    void pollDocuments();
+    return () => { stopped = true; clearTimeout(timeout); };
+  }, [appliedProfile, canText, documentOffset]);
 
   useEffect(() => {
     if (!active) return;
@@ -121,6 +155,37 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
   }
 
   return <div className="space-y-6">
+    {canText && <section className="panel space-y-4 p-6" aria-live="polite">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div><h2 className="text-lg font-semibold">Imported BlackGlass records</h2>
+          <p className="text-sm text-ink-muted">{documents ? `${documents.total.toLocaleString()} records · refreshes every 5 seconds` : "Loading imported records…"}</p></div>
+        <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); setDocumentOffset(0); setAppliedProfile(profileFilter.trim()); }}>
+          <input className={field} aria-label="Filter by profile ID" placeholder="Profile ID" value={profileFilter} onChange={event => setProfileFilter(event.target.value)} maxLength={256} />
+          <Button type="submit">Filter</Button>
+          {appliedProfile && <Button type="button" variant="secondary" onClick={() => { setProfileFilter(""); setAppliedProfile(""); setDocumentOffset(0); }}>Clear</Button>}
+        </form>
+      </div>
+      {documentsError && <p className="text-sm text-red-400">{documentsError}</p>}
+      {documents?.items.length === 0 && <p className="text-sm text-ink-muted">No records match this filter.</p>}
+      {documents && documents.items.length > 0 && <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
+        <thead className="border-b border-white/15 text-xs text-ink-muted"><tr><th className="py-2 pr-3">Record</th><th className="py-2 pr-3">Profile</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">State</th><th className="py-2">Received</th></tr></thead>
+        <tbody className="divide-y divide-white/10">{documents.items.map(document => {
+          const sourceUrl = safeHttpUrl(document.attributes.source_url);
+          return <tr key={document.document_uuid}>
+            <td className="py-3 pr-3"><p className="font-medium" dir="auto">{document.title}</p><p className="max-w-[22rem] truncate text-xs text-ink-muted" title={document.source_id}>{sourceUrl ? <a className="underline" href={sourceUrl} target="_blank" rel="noreferrer">{document.source_id}</a> : document.source_id}</p></td>
+            <td className="py-3 pr-3 text-xs">{document.profile_id ?? "—"}</td>
+            <td className="py-3 pr-3">{document.source_type}</td>
+            <td className="py-3 pr-3"><span className="rounded-full border border-white/15 px-2 py-1 text-xs">{document.processing_state}</span></td>
+            <td className="py-3 text-xs text-ink-muted">{new Date(document.created_at).toLocaleString()}</td>
+          </tr>;
+        })}</tbody>
+      </table></div>}
+      {documents && documents.total > documents.limit && <div className="flex items-center justify-end gap-2">
+        <Button variant="secondary" disabled={documentOffset === 0} onClick={() => setDocumentOffset(Math.max(0, documentOffset - documents.limit))}>Previous</Button>
+        <span className="text-xs text-ink-muted">{documentOffset + 1}–{Math.min(documentOffset + documents.limit, documents.total)} of {documents.total}</span>
+        <Button variant="secondary" disabled={documentOffset + documents.limit >= documents.total} onClick={() => setDocumentOffset(documentOffset + documents.limit)}>Next</Button>
+      </div>}
+    </section>}
     <section className="panel space-y-2 p-6" aria-live="polite">
       <h2 className="text-lg font-semibold">Processing workers</h2>
       {workflow ? <>
@@ -172,4 +237,14 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
       </article>)}
     </section>}
   </div>;
+}
+
+function safeHttpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }

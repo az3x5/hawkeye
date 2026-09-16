@@ -76,6 +76,7 @@ export function LiveStatistics({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="People" value={stats.persons} href="/persons" />
+        <Metric label="BlackGlass records" value={stats.language_documents} href="/evidence" />
         <Metric label="Face samples" value={stats.face_samples} />
         <Metric label="Embeddings stored" value={stats.embeddings} />
         <Metric
@@ -87,6 +88,13 @@ export function LiveStatistics({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <Breakdown
+          title="BlackGlass records by state"
+          counts={stats.language_documents_by_state}
+          total={stats.language_documents}
+          empty="No BlackGlass text records have been imported yet."
+          href="/evidence"
+        />
         <Breakdown
           title="Face samples by state"
           counts={stats.samples_by_state}

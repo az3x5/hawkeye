@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.v1.dependencies import (
@@ -22,6 +22,7 @@ from app.api.v1.dependencies import (
     get_enrolment_service,
     get_language_document_service,
     get_media_service,
+    get_read_queries,
 )
 from app.api.v1.enrolments import MAX_IMAGE_BYTES
 from app.api.v1.media import (
@@ -32,6 +33,7 @@ from app.api.v1.media import (
     read_bounded_upload,
 )
 from app.api.v1.security import require
+from app.connectors.postgres.queries import ReadQueries
 from app.connectors.s3 import BlackGlassS3Error, BlackGlassS3Source
 from app.core.errors import ErrorResponse, FaceIdError
 from app.domain.auth import Principal, Scope
@@ -148,6 +150,31 @@ class BlackGlassIngestionResponse(BaseModel):
     media: MediaAssetResponse | None = None
     media_source: AssetSourceResponse | None = None
     processing_state: ProcessingState | None = None
+
+
+class BlackGlassDocumentSummary(BaseModel):
+    """One imported record suitable for monitoring without exposing its text."""
+
+    document_uuid: UUID
+    source_id: str
+    source_type: str
+    profile_id: str | None
+    title: str
+    source: str
+    primary_script: str
+    processing_state: ProcessingState
+    attributes: dict[str, Any]
+    created_at: datetime
+    processed_at: datetime | None
+
+
+class BlackGlassDocumentPage(BaseModel):
+    """A bounded page of imported BlackGlass text records."""
+
+    items: list[BlackGlassDocumentSummary]
+    total: int
+    limit: int
+    offset: int
 
 
 class BlackGlassCapabilityResponse(BaseModel):
@@ -618,7 +645,12 @@ async def ingest_blackglass_text(
     _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
 ) -> BlackGlassIngestionResponse:
     """Persist BlackGlass text and enqueue semantic indexing idempotently."""
-    attributes = {**body.attributes, "language_hint": body.language_hint}
+    attributes = {
+        **body.attributes,
+        "source_id": body.source_id,
+        "source_type": body.source_type,
+        "language_hint": body.language_hint,
+    }
     source_system = str(body.attributes.get("source_system", "blackglass-prod"))
     document, created = await service.submit(
         DocumentSubmission(
@@ -638,4 +670,35 @@ async def ingest_blackglass_text(
         content_type="text/plain; charset=utf-8",
         analysis_routes=[_route(item, "text/plain") for item in body.requested_analyses],
         processing_state=document.processing_state,
+    )
+
+
+@router.get(
+    "/documents",
+    response_model=BlackGlassDocumentPage,
+    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+)
+async def list_blackglass_documents(
+    queries: Annotated[ReadQueries, Depends(get_read_queries)],
+    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    profile_id: Annotated[str | None, Query(max_length=256)] = None,
+    processing_state: Annotated[ProcessingState | None, Query()] = None,
+) -> BlackGlassDocumentPage:
+    """Return imported text records and their current indexing state."""
+    page = await queries.list_language_documents(
+        limit=limit,
+        offset=offset,
+        profile_id=profile_id,
+        processing_state=processing_state.value if processing_state is not None else None,
+    )
+    return BlackGlassDocumentPage(
+        items=[
+            BlackGlassDocumentSummary.model_validate(item, from_attributes=True)
+            for item in page.items
+        ],
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
     )

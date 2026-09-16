@@ -217,6 +217,31 @@ describe("proxy allowlist", () => {
     });
   });
 
+  it("forwards the imported BlackGlass record page and profile filter", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, limit: 25, offset: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { GET } = await import("../../app/api/v1/[...path]/route");
+
+    const response = await GET(
+      new Request("http://localhost/api/v1/integrations/blackglass/documents?profile_id=profile-1"),
+      { params: Promise.resolve({ path: ["integrations", "blackglass", "documents"] }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://api.test:8000/api/v1/integrations/blackglass/documents?profile_id=profile-1",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Accept: "application/json",
+      Authorization: "Bearer faceid_test-token",
+    });
+  });
+
   it("forwards the media list with its bounded query", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ items: [], total: 0, limit: 8, offset: 0 }), {

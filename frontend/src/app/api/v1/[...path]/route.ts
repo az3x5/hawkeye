@@ -26,6 +26,7 @@ const READABLE = [
   /^system\/metrics$/,
   /^media$/,
   /^integrations\/blackglass\/capabilities$/,
+  /^integrations\/blackglass\/documents$/,
   /^integrations\/blackglass\/evidence\/[0-9a-f-]{36}(\/(content|report))?$/,
   /^integrations\/blackglass\/evidence\/events$/,
   /^integrations\/blackglass\/evidence\/status$/,
@@ -117,7 +118,7 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
             Authorization: `Bearer ${token}`,
           }
         : {
-            Accept: path === "system/metrics" || path === "statistics" || path === "media" || path === "integrations/blackglass/capabilities" ? "application/json" : "image/jpeg",
+            Accept: path === "system/metrics" || path === "statistics" || path === "media" || path === "integrations/blackglass/capabilities" || path === "integrations/blackglass/documents" ? "application/json" : "image/jpeg",
             Authorization: `Bearer ${token}`,
           },
     body:

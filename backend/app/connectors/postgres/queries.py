@@ -20,6 +20,7 @@ from app.connectors.postgres.tables import (
     face_embeddings,
     face_samples,
     identifications,
+    language_documents,
     person_external_identifiers,
     persons,
 )
@@ -78,6 +79,25 @@ class Statistics:
     awaiting_review: int
     reviews_recorded: int
     audit_events: int
+    language_documents: int
+    language_documents_by_state: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class LanguageDocumentSummary:
+    """One imported text record without returning its potentially sensitive body."""
+
+    document_uuid: UUID
+    source_id: str
+    source_type: str
+    profile_id: str | None
+    title: str
+    source: str
+    primary_script: str
+    processing_state: str
+    attributes: dict[str, Any]
+    created_at: datetime
+    processed_at: datetime | None
 
 
 def _clamp(limit: int, offset: int) -> tuple[int, int]:
@@ -329,6 +349,55 @@ class ReadQueries:
 
     # -- statistics ---------------------------------------------------------
 
+    async def list_language_documents(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        profile_id: str | None = None,
+        processing_state: str | None = None,
+    ) -> Page[LanguageDocumentSummary]:
+        """List imported text records using indexed identity and state fields."""
+        limit, offset = _clamp(limit, offset)
+        conditions = []
+        if profile_id:
+            conditions.append(language_documents.c.profile_id == profile_id)
+        if processing_state:
+            conditions.append(language_documents.c.processing_state == processing_state)
+        where = and_(*conditions) if conditions else None
+
+        counting = select(func.count()).select_from(language_documents)
+        listing = select(language_documents)
+        if where is not None:
+            counting = counting.where(where)
+            listing = listing.where(where)
+
+        total = await self._session.scalar(counting)
+        rows = await self._session.execute(
+            listing.order_by(language_documents.c.created_at.desc()).limit(limit).offset(offset)
+        )
+        return Page(
+            items=[
+                LanguageDocumentSummary(
+                    document_uuid=row.document_uuid,
+                    source_id=row.source_id,
+                    source_type=row.source_type,
+                    profile_id=row.profile_id,
+                    title=row.title,
+                    source=row.source,
+                    primary_script=row.primary_script,
+                    processing_state=row.processing_state,
+                    attributes=dict(row.attributes),
+                    created_at=row.created_at,
+                    processed_at=row.processed_at,
+                )
+                for row in rows.all()
+            ],
+            total=int(total or 0),
+            limit=limit,
+            offset=offset,
+        )
+
     async def statistics(self) -> Statistics:
         """Counts for the dashboard. Every figure comes from a real query."""
         persons_total = await self._session.scalar(select(func.count()).select_from(persons))
@@ -340,6 +409,9 @@ class ReadQueries:
             select(func.count()).select_from(identifications)
         )
         audit_total = await self._session.scalar(select(func.count()).select_from(audit_events))
+        language_total = await self._session.scalar(
+            select(func.count()).select_from(language_documents)
+        )
 
         by_state = await self._session.execute(
             select(face_samples.c.processing_state, func.count()).group_by(
@@ -348,6 +420,11 @@ class ReadQueries:
         )
         by_outcome = await self._session.execute(
             select(identifications.c.outcome, func.count()).group_by(identifications.c.outcome)
+        )
+        language_by_state = await self._session.execute(
+            select(language_documents.c.processing_state, func.count()).group_by(
+                language_documents.c.processing_state
+            )
         )
         awaiting = await self._session.scalar(
             select(func.count())
@@ -373,4 +450,6 @@ class ReadQueries:
             awaiting_review=int(awaiting or 0),
             reviews_recorded=int(reviewed or 0),
             audit_events=int(audit_total or 0),
+            language_documents=int(language_total or 0),
+            language_documents_by_state={row[0]: int(row[1]) for row in language_by_state.all()},
         )

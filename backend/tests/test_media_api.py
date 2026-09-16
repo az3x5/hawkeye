@@ -150,6 +150,7 @@ def build_client(
 
     app.dependency_overrides[get_media_service] = _service
     language_service = RecordingLanguageService()
+    app.state.language_service = language_service
 
     async def _language_service() -> RecordingLanguageService:
         return language_service
@@ -371,6 +372,10 @@ class TestBlackGlassMediaContract:
         assert "source" not in body
         assert body["subject"]["type"] == "language_document"
         assert body["analysis_routes"][0]["state"] == "queued"
+        request = client.app.state.language_service.request
+        assert request is not None
+        assert request.attributes["source_id"] == "post-91"
+        assert request.attributes["source_type"] == "post"
 
     def test_aws_status_exposes_no_credentials(self, client: TestClient) -> None:
         response = client.get("/api/v1/integrations/blackglass/aws/status")

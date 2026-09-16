@@ -65,6 +65,17 @@ def test_language_vectors_are_attributed_to_model_provenance() -> None:
     assert "normalized_text" in table.c
 
 
+def test_language_sources_have_flat_indexable_identity() -> None:
+    table = metadata.tables["language_documents"]
+    assert {"source_id", "source_type", "profile_id"} <= set(table.c.keys())
+    assert table.c.source_id.nullable is False
+    assert table.c.source_type.nullable is False
+    assert {
+        "ix_language_documents_source_identity",
+        "ix_language_documents_profile_id",
+    } <= {index.name for index in table.indexes}
+
+
 def test_processing_state_is_isolated_in_its_own_schema() -> None:
     assert {
         "processing.jobs",
