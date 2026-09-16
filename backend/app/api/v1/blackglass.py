@@ -751,7 +751,6 @@ async def analyze_blackglass_profile(
                         language_documents.c.source_id,
                         language_documents.c.title,
                         language_documents.c.original_text,
-                        language_documents.c.attributes,
                         language_documents.c.created_at,
                     )
                     .where(language_documents.c.profile_id == profile_id)
@@ -766,20 +765,12 @@ async def analyze_blackglass_profile(
 
         blocks = []
         for row in rows:
-            attributes = dict(row["attributes"])
-            provenance = [f"source_id: {row['source_id']}"]
-            if published := attributes.get("published_at"):
-                provenance.append(f"published_at: {published}")
-            if source_url := attributes.get("source_url"):
-                provenance.append(f"source_url: {source_url}")
             blocks.append(
                 "\n".join(
                     [
-                        "[BLACKGLASS SOURCE]",
-                        *provenance,
-                        "text:",
+                        f"[SOURCE {row['source_id']}]",
                         row["original_text"],
-                        "[/BLACKGLASS SOURCE]",
+                        "[/SOURCE]",
                     ]
                 )
             )
