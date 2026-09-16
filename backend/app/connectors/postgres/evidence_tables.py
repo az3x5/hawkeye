@@ -30,6 +30,8 @@ runs = Table(
     Column("analysis_id", UUID(as_uuid=True), primary_key=True),
     Column("owner", String(256), nullable=False),
     Column("idempotency_key", String(64), nullable=False, unique=True),
+    Column("source_id", String(256), nullable=False),
+    Column("source_type", String(64), nullable=False),
     Column("submission", JSONB, nullable=False),
     Column("media_uuid", UUID(as_uuid=True), ForeignKey(media_assets.c.media_uuid)),
     Column("original_text", Text),
@@ -41,6 +43,7 @@ runs = Table(
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Index("ix_evidence_runs_owner", "owner", "created_at"),
+    Index("ix_evidence_runs_source", "owner", "source_type", "source_id"),
     schema="evidence",
 )
 

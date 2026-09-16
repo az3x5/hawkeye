@@ -27,7 +27,6 @@ from app.domain.evidence import (
     PIPELINE,
     AnalysisOptions,
     Citation,
-    EvidenceSource,
     Finding,
     Findings,
     Locator,
@@ -52,7 +51,9 @@ from .test_media_api import PNG_UPLOAD
 
 def submission(object_id: str = "record-1") -> TextSubmission:
     return TextSubmission(
-        source=EvidenceSource(object_type="post", object_id=object_id),
+        source_id=object_id,
+        source_type="post",
+        attributes={"source_system": "blackglass-prod"},
         text="ދިވެހި text\nThe meeting is at nine.",
         options=AnalysisOptions(summarize=False),
     )
@@ -93,6 +94,28 @@ def test_record_and_owner_are_part_of_idempotency() -> None:
     assert submission_key("a", original, "f" * 64) == submission_key("a", replay, "f" * 64)
 
 
+def test_legacy_source_is_flattened_to_canonical_contract() -> None:
+    body = TextSubmission.model_validate(
+        {
+            "schema_version": "1.0",
+            "source": {
+                "system": "blackglass",
+                "object_id": "POST-LEGACY-1",
+                "object_type": "post",
+                "source_url": "https://blackglass.live/posts/POST-LEGACY-1",
+            },
+            "text": "legacy payload",
+        }
+    )
+
+    payload = body.model_dump(mode="json")
+    assert payload["schema_version"] == "1.1"
+    assert payload["source_id"] == "POST-LEGACY-1"
+    assert payload["source_type"] == "post"
+    assert payload["attributes"]["source_system"] == "blackglass"
+    assert "source" not in payload
+
+
 def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
     analysis_id = uuid4()
     evidence_id = uuid4()
@@ -104,7 +127,9 @@ def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
             "revision": 2,
             "created_at": now,
             "updated_at": now,
-            "source": {"system": "blackglass-prod", "object_type": "post", "object_id": "BG-1"},
+            "source_id": "BG-1",
+            "source_type": "post",
+            "attributes": {"source_system": "blackglass-prod"},
             "evidence": [
                 {
                     "evidence_id": evidence_id,
@@ -387,17 +412,17 @@ async def test_unified_ingestion_accepts_text_and_files_and_replays(db, settings
         kind="service",
     )
     payload = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "report_request_id": "BG-REPORT-123",
         "subject": {
             "subject_type": "social_profile",
             "subject_id": "BG-PROFILE-456",
             "display_label": "Profile under review",
         },
-        "source": {
-            "system": "blackglass-prod",
-            "object_type": "post",
-            "object_id": "POST-1001",
+        "source_id": "POST-1001",
+        "source_type": "post",
+        "attributes": {
+            "source_system": "blackglass-prod",
             "collected_at": "2026-09-15T08:00:00Z",
         },
         "text": "ދިވެހި post with an attached image",
@@ -443,7 +468,7 @@ async def test_unified_ingestion_accepts_text_and_files_and_replays(db, settings
         empty_payload = {
             **payload,
             "text": None,
-            "source": {**payload["source"], "object_id": "POST-2"},
+            "source_id": "POST-2",
         }
         empty = await client.post(
             endpoint,
@@ -523,7 +548,7 @@ async def test_worker_finishes_evidence_and_outbox_atomically(db, settings, tmp_
         job = await SqlAlchemyProcessingJobRepository(session).get(reserved.job.job_uuid)
         assert job.status.value == "completed"
         page = await EvidenceRepository(session).event_page("owner", 0, 10)
-        assert page["events"][0]["source"]["object_id"] == body.source.object_id
+        assert page["events"][0]["source_id"] == body.source_id
 
 
 async def test_webhook_rejects_redirects_and_wrong_ack(monkeypatch) -> None:
@@ -612,7 +637,7 @@ async def test_delivery_worker_sends_blackglass_report(db, settings, tmp_path, m
     finally:
         await worker.close()
     assert delivered[0]["report"]["data"]["document"]["schema"] == 2
-    assert delivered[0]["report"]["data"]["subject"] == body.source.object_id
+    assert delivered[0]["report"]["data"]["subject"] == body.source_id
     async with db.session() as session:
         assert (await session.execute(select(events.c.delivered_at))).scalar_one() is not None
 

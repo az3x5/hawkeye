@@ -46,10 +46,16 @@ def localized(en: str, dv: str = "") -> dict[str, str]:
 
 def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
     """Create a deterministic report; never add conclusions absent from the result."""
-    source = analysis["source"]
+    legacy_source = analysis.get("source") or {}
+    source_id = analysis.get("source_id") or legacy_source.get("object_id")
+    source_type = analysis.get("source_type") or legacy_source.get("object_type")
+    attributes = dict(analysis.get("attributes") or {})
+    if legacy_source:
+        attributes.setdefault("source_system", legacy_source.get("system"))
+        attributes.setdefault("collected_at", legacy_source.get("collected_at"))
     subject = analysis.get("subject") or {}
-    subject_id = subject.get("subject_id", source["object_id"])
-    subject_type = subject.get("subject_type", source["object_type"])
+    subject_id = subject.get("subject_id", source_id)
+    subject_type = subject.get("subject_type", source_type)
     subject_label = subject.get("display_label") or subject_id
     evidence = analysis.get("evidence", [])
     findings = analysis.get("findings", [])
@@ -81,8 +87,8 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
             body = "Cyber-ai evidence analysis report. Findings remain unreviewed."
             rows = [
                 [localized("Analysis ID"), localized(analysis_id)],
-                [localized("Source system"), localized(source["system"])],
-                [localized("Source record"), localized(source["object_id"])],
+                [localized("Source type"), localized(str(source_type))],
+                [localized("Source record"), localized(str(source_id))],
                 [localized("Status"), localized(analysis["status"])],
             ]
         elif kind in by_section:
@@ -163,9 +169,9 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
                 "content_items": len(evidence),
                 "linked_profiles": 0,
                 "gaps": gaps,
-                "subject_platform": source["system"],
-                "observation_from": source.get("collected_at"),
-                "observation_to": source.get("collected_at"),
+                "subject_platform": attributes.get("source_system"),
+                "observation_from": attributes.get("collected_at"),
+                "observation_to": attributes.get("collected_at"),
                 "cover_profile_image_url": None,
                 "generation_options": {"citation_required": True},
                 "generator": {"system": "cyber-ai", "pipeline": "evidence_analysis"},
@@ -177,13 +183,13 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
                 "lang": "en",
                 "cover": {
                     "date": generated_at,
-                    "focus": source["object_type"],
+                    "focus": source_type,
                     "purpose": "Evidence analysis",
                     "subject": subject_label,
                     "version": str(analysis["revision"]),
                     "profileImage": "",
-                    "observationFrom": source.get("collected_at"),
-                    "observationTo": source.get("collected_at"),
+                    "observationFrom": attributes.get("collected_at"),
+                    "observationTo": attributes.get("collected_at"),
                 },
                 "outline": outline,
                 "content": {"lexical": {"root": {"type": "root", "children": []}}},

@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, KeySquare } from "lucide-react";
+import { Copy, KeyRound, KeySquare } from "lucide-react";
 import { useActionState, useState, useTransition } from "react";
 import {
   issueTokenAction,
@@ -14,6 +14,7 @@ import { formatTime, shortId } from "@/lib/format";
 import type { TokenRecord } from "@/lib/types";
 
 const FIELD = "w-full rounded-md border border-line bg-surface-sunken px-3 py-2 text-sm text-ink";
+const BLACKGLASS_SCOPES = ["language", "media:write", "media:read"] as const;
 
 /** Service credentials: what exists, issuing more, and revoking them. */
 export function TokensPanel({ tokens }: { tokens: TokenRecord[] }) {
@@ -46,6 +47,64 @@ export function TokensPanel({ tokens }: { tokens: TokenRecord[] }) {
           {issuing ? "Cancel" : "Issue credential"}
         </button>
       </div>
+
+      <div className="border-b border-line p-4">
+        <div className="rounded-lg border border-accent/30 bg-accent/5 p-4">
+          <div className="flex items-start gap-3">
+            <span className="rounded-md bg-accent/10 p-2 text-accent">
+              <KeyRound className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold text-ink">BlackGlass bearer token</h3>
+              <p className="mt-1 text-sm text-ink-muted">
+                Create a 90-day service credential for ingestion and result retrieval. The
+                credential cannot manage accounts, enrol faces, or run identification.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Granted scopes">
+                {BLACKGLASS_SCOPES.map((scope) => (
+                  <StatusBadge key={scope} tone="info">
+                    {scope}
+                  </StatusBadge>
+                ))}
+              </div>
+
+              <form action={action} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                <label className="block flex-1 space-y-1.5 text-sm text-ink-muted">
+                  Credential name
+                  <input
+                    type="text"
+                    name="subject"
+                    defaultValue="blackglass-production"
+                    className={FIELD}
+                    required
+                  />
+                </label>
+                <input type="hidden" name="kind" value="service" />
+                <input type="hidden" name="expires_in_days" value="90" />
+                {BLACKGLASS_SCOPES.map((scope) => (
+                  <input key={scope} type="hidden" name="scopes" value={scope} />
+                ))}
+                <button
+                  type="submit"
+                  disabled={pending}
+                  className="shrink-0 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
+                >
+                  {pending ? "Creating…" : "Create bearer token"}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {result !== null && !result.ok ? (
+        <p
+          className="border-b border-line border-l-2 border-l-reject bg-reject/10 px-4 py-2 text-sm text-reject"
+          role="alert"
+        >
+          {result.message}
+        </p>
+      ) : null}
 
       {issuing ? (
         <form action={action} className="max-w-sm space-y-3 border-b border-line p-4">
@@ -91,12 +150,6 @@ export function TokensPanel({ tokens }: { tokens: TokenRecord[] }) {
               </span>
             </span>
           </label>
-
-          {result !== null && !result.ok ? (
-            <p className="rounded-md border-l-2 border-reject bg-reject/10 px-3 py-2 text-sm text-reject">
-              {result.message}
-            </p>
-          ) : null}
 
           <button
             type="submit"
@@ -187,7 +240,12 @@ export function TokensPanel({ tokens }: { tokens: TokenRecord[] }) {
  * Held in component state and never written to browser storage.
  */
 function SecretOnce({ secret }: { secret: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"token" | "header" | null>(null);
+  const authorizationHeader = `Authorization: Bearer ${secret}`;
+
+  function copy(value: string, kind: "token" | "header") {
+    void navigator.clipboard.writeText(value).then(() => setCopied(kind));
+  }
 
   return (
     <div className="border-b border-line bg-accept/5 p-4">
@@ -195,16 +253,47 @@ function SecretOnce({ secret }: { secret: string }) {
       <p className="mt-1 text-sm text-ink-muted">
         Copy it now. Only its hash is stored, so it cannot be shown again.
       </p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-3 grid gap-3">
+        <SecretValue
+          label="Bearer token"
+          value={secret}
+          copied={copied === "token"}
+          onCopy={() => copy(secret, "token")}
+        />
+        <SecretValue
+          label="Authorization header"
+          value={authorizationHeader}
+          copied={copied === "header"}
+          onCopy={() => copy(authorizationHeader, "header")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SecretValue({
+  label,
+  value,
+  copied,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-ink-faint">{label}</p>
+      <div className="flex flex-wrap items-center gap-2">
         <code className="identifier min-w-0 flex-1 rounded border border-line bg-surface-sunken px-2 py-1.5 break-all text-ink">
-          {secret}
+          {value}
         </code>
         <button
           type="button"
-          onClick={() => {
-            void navigator.clipboard.writeText(secret).then(() => setCopied(true));
-          }}
+          onClick={onCopy}
           className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-muted hover:text-ink"
+          aria-label={`Copy ${label.toLowerCase()}`}
         >
           <Copy className="size-3.5" aria-hidden="true" />
           {copied ? "Copied" : "Copy"}

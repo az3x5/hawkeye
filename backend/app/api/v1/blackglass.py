@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.api.v1.dependencies import (
     get_blackglass_s3_source,
@@ -78,23 +78,12 @@ class AnalysisRoute(BaseModel):
     detail: str
 
 
-class BlackGlassSource(BaseModel):
-    """External identity and collection facts retained with content."""
-
-    system: str = Field(default="blackglass-prod", min_length=1, max_length=128)
-    object_type: str = Field(min_length=1, max_length=64)
-    object_id: str = Field(min_length=1, max_length=256)
-    source_url: str | None = Field(default=None, max_length=2048)
-    collected_at: datetime | None = None
-    published_at: datetime | None = None
-    collector_version: str | None = Field(default=None, max_length=128)
-
-
 class BlackGlassTextRequest(BaseModel):
     """One BlackGlass text object submitted for search and later enrichment."""
 
-    schema_version: Literal["1.0"] = "1.0"
-    source: BlackGlassSource
+    schema_version: Literal["1.0", "1.1"] = "1.1"
+    source_id: str = Field(min_length=1, max_length=256)
+    source_type: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=256)
     text: str = Field(min_length=1, max_length=100_000)
     language_hint: str | None = Field(default=None, max_length=16)
@@ -102,6 +91,31 @@ class BlackGlassTextRequest(BaseModel):
     requested_analyses: list[AnalysisCapability] = Field(
         default_factory=lambda: [AnalysisCapability.SEMANTIC_EMBEDDING]
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_legacy_source(cls, value: Any) -> Any:
+        """Normalize the old source object without returning or persisting it."""
+        if not isinstance(value, dict) or not isinstance(value.get("source"), dict):
+            return value
+        source = dict(value["source"])
+        flattened = dict(value)
+        flattened.pop("source", None)
+        flattened["schema_version"] = "1.1"
+        flattened.setdefault("source_id", source.get("object_id"))
+        flattened.setdefault("source_type", source.get("object_type"))
+        attributes = dict(flattened.get("attributes") or {})
+        for old, new in {
+            "system": "source_system",
+            "source_url": "source_url",
+            "collected_at": "collected_at",
+            "published_at": "published_at",
+            "collector_version": "collector_version",
+        }.items():
+            if source.get(old) is not None:
+                attributes.setdefault(new, source[old])
+        flattened["attributes"] = attributes
+        return flattened
 
     @field_validator("requested_analyses")
     @classmethod
@@ -122,8 +136,10 @@ class IngestedSubject(BaseModel):
 class BlackGlassIngestionResponse(BaseModel):
     """Shared acknowledgement for text and binary deliveries."""
 
-    schema_version: Literal["1.0"] = "1.0"
-    source: BlackGlassSource
+    schema_version: Literal["1.1"] = "1.1"
+    source_id: str
+    source_type: str
+    attributes: dict[str, Any] = Field(default_factory=dict)
     subject: IngestedSubject
     status: Literal["accepted", "already_exists"]
     created: bool
@@ -515,10 +531,13 @@ async def import_blackglass_aws_faces(
 )
 async def ingest_blackglass_media(
     file: Annotated[UploadFile, File()],
-    external_object_id: Annotated[str, Form(min_length=1, max_length=256)],
-    external_object_type: Annotated[str, Form(min_length=1, max_length=64)],
     service: Annotated[MediaService, Depends(get_media_service)],
     principal: Annotated[Principal, Depends(require(Scope.MEDIA_WRITE))],
+    source_id: Annotated[str | None, Form(min_length=1, max_length=256)] = None,
+    source_type: Annotated[str | None, Form(min_length=1, max_length=64)] = None,
+    attributes: Annotated[str, Form(max_length=16000)] = "{}",
+    external_object_id: Annotated[str | None, Form(min_length=1, max_length=256)] = None,
+    external_object_type: Annotated[str | None, Form(min_length=1, max_length=64)] = None,
     source_system: Annotated[str, Form(min_length=1, max_length=128)] = "blackglass-prod",
     classification: Annotated[Classification, Form()] = Classification.INTERNAL,
     source_url: Annotated[str | None, Form(max_length=2048)] = None,
@@ -529,6 +548,24 @@ async def ingest_blackglass_media(
 ) -> BlackGlassIngestionResponse:
     """Store one BlackGlass binary object and return its processing routes."""
     try:
+        resolved_id = source_id or external_object_id
+        resolved_type = source_type or external_object_type
+        if resolved_id is None or resolved_type is None:
+            raise InvalidMediaError("source_id and source_type are required")
+        try:
+            source_attributes = json.loads(attributes)
+        except json.JSONDecodeError as exc:
+            raise InvalidMediaError("attributes must be a JSON object", field="attributes") from exc
+        if not isinstance(source_attributes, dict):
+            raise InvalidMediaError("attributes must be a JSON object", field="attributes")
+        source_attributes = {
+            **source_attributes,
+            "source_system": source_system,
+            **({"source_url": source_url} if source_url else {}),
+            **({"collected_at": collected_at.isoformat()} if collected_at else {}),
+            **({"published_at": published_at.isoformat()} if published_at else {}),
+            **({"collector_version": collector_version} if collector_version else {}),
+        }
         requested = _requested(requested_analyses)
         data = await read_bounded_upload(file, service.max_bytes)
         result = await service.ingest(
@@ -538,7 +575,7 @@ async def ingest_blackglass_media(
                 source_system=source_system,
                 declared_content_type=file.content_type,
                 classification=classification,
-                external_source_id=external_object_id,
+                external_source_id=resolved_id,
                 source_url=source_url,
                 collected_at=collected_at,
                 published_at=published_at,
@@ -553,19 +590,12 @@ async def ingest_blackglass_media(
     except MediaError as exc:
         raise InvalidMediaError(str(exc)) from exc
 
-    source = BlackGlassSource(
-        system=source_system,
-        object_type=external_object_type,
-        object_id=external_object_id,
-        source_url=source_url,
-        collected_at=collected_at,
-        published_at=published_at,
-        collector_version=collector_version,
-    )
     if not requested:
         requested = _default_analyses(result.asset.mime_type)
     return BlackGlassIngestionResponse(
-        source=source,
+        source_id=resolved_id,
+        source_type=resolved_type,
+        attributes=source_attributes,
         subject=IngestedSubject(type="media", id=result.asset.media_uuid),
         status="accepted" if result.created else "already_exists",
         created=result.created,
@@ -588,21 +618,20 @@ async def ingest_blackglass_text(
     _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
 ) -> BlackGlassIngestionResponse:
     """Persist BlackGlass text and enqueue semantic indexing idempotently."""
-    attributes = {
-        **body.attributes,
-        "blackglass": body.source.model_dump(mode="json"),
-        "language_hint": body.language_hint,
-    }
+    attributes = {**body.attributes, "language_hint": body.language_hint}
+    source_system = str(body.attributes.get("source_system", "blackglass-prod"))
     document, created = await service.submit(
         DocumentSubmission(
             title=body.title,
-            source=body.source.system,
+            source=source_system,
             text=body.text,
             attributes=attributes,
         )
     )
     return BlackGlassIngestionResponse(
-        source=body.source,
+        source_id=body.source_id,
+        source_type=body.source_type,
+        attributes=body.attributes,
         subject=IngestedSubject(type="language_document", id=document.document_uuid),
         status="accepted" if created else "already_exists",
         created=created,

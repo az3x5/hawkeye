@@ -274,8 +274,8 @@ class TestBlackGlassMediaContract:
         response = client.post(
             "/api/v1/integrations/blackglass/media",
             data={
-                "external_object_id": "bg-4471",
-                "external_object_type": "post",
+                "source_id": "bg-4471",
+                "source_type": "post",
                 "source_system": "blackglass-prod",
                 "requested_analyses": '["face_identification", "vehicle_detection"]',
             },
@@ -283,7 +283,9 @@ class TestBlackGlassMediaContract:
         )
         assert response.status_code == 202
         body = response.json()
-        assert body["source"]["object_id"] == "bg-4471"
+        assert body["source_id"] == "bg-4471"
+        assert body["source_type"] == "post"
+        assert body["attributes"]["source_system"] == "blackglass-prod"
         assert body["media_source"]["source_type"] == "blackglass"
         assert body["subject"]["type"] == "media"
         assert body["analysis_routes"] == [
@@ -309,8 +311,8 @@ class TestBlackGlassMediaContract:
 
     def test_redelivery_is_idempotent_on_content_and_source(self, client: TestClient) -> None:
         fields = {
-            "external_object_id": "bg-repeat",
-            "external_object_type": "media",
+            "source_id": "bg-repeat",
+            "source_type": "media",
         }
         first = client.post(
             "/api/v1/integrations/blackglass/media",
@@ -329,8 +331,8 @@ class TestBlackGlassMediaContract:
         response = client.post(
             "/api/v1/integrations/blackglass/media",
             data={
-                "external_object_id": "bg-invalid",
-                "external_object_type": "media",
+                "source_id": "bg-invalid",
+                "source_type": "media",
                 "requested_analyses": "mind_reading",
             },
             files={"file": PNG_UPLOAD},
@@ -341,7 +343,7 @@ class TestBlackGlassMediaContract:
     def test_image_defaults_are_selected_after_type_detection(self, client: TestClient) -> None:
         response = client.post(
             "/api/v1/integrations/blackglass/media",
-            data={"external_object_id": "bg-default", "external_object_type": "image"},
+            data={"source_id": "bg-default", "source_type": "image"},
             files={"file": PNG_UPLOAD},
         )
         assert [route["capability"] for route in response.json()["analysis_routes"]] == [
@@ -349,15 +351,14 @@ class TestBlackGlassMediaContract:
             "ocr",
         ]
 
-    def test_text_is_persisted_with_source_envelope(self, client: TestClient) -> None:
+    def test_text_uses_flat_indexable_source_identity(self, client: TestClient) -> None:
         response = client.post(
             "/api/v1/integrations/blackglass/text",
             json={
-                "source": {
-                    "system": "blackglass-prod",
-                    "object_type": "post",
-                    "object_id": "post-91",
-                },
+                "schema_version": "1.1",
+                "source_id": "post-91",
+                "source_type": "post",
+                "attributes": {"source_system": "blackglass-prod"},
                 "title": "Collected post",
                 "text": "miadhu male gai vaahaka dhakkaa",
                 "language_hint": "dv-Latn",
@@ -365,6 +366,9 @@ class TestBlackGlassMediaContract:
         )
         assert response.status_code == 202
         body = response.json()
+        assert body["source_id"] == "post-91"
+        assert body["source_type"] == "post"
+        assert "source" not in body
         assert body["subject"]["type"] == "language_document"
         assert body["analysis_routes"][0]["state"] == "queued"
 

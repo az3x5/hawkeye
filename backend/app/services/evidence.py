@@ -26,6 +26,28 @@ from app.domain.evidence import (
 from app.domain.processing import ProcessingJob
 
 
+def _source_fields(submission: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    """Read canonical flat identity while remaining able to serve pre-1.1 rows."""
+    if submission.get("source_id") and submission.get("source_type"):
+        return (
+            str(submission["source_id"]),
+            str(submission["source_type"]),
+            dict(submission.get("attributes") or {}),
+        )
+    legacy = dict(submission.get("source") or {})
+    attributes = dict(submission.get("attributes") or {})
+    for old, new in {
+        "system": "source_system",
+        "source_url": "source_url",
+        "collected_at": "collected_at",
+        "published_at": "published_at",
+        "collector_version": "collector_version",
+    }.items():
+        if legacy.get(old) is not None:
+            attributes.setdefault(new, legacy[old])
+    return str(legacy["object_id"]), str(legacy["object_type"]), attributes
+
+
 class EvidenceNotFound(FaceIdError):
     """Unknown and inaccessible records deliberately share one response."""
 
@@ -59,6 +81,8 @@ class EvidenceRepository:
                     analysis_id=uuid4(),
                     owner=owner,
                     idempotency_key=key,
+                    source_id=submission.source_id,
+                    source_type=submission.source_type,
                     submission=submission.model_dump(mode="json", exclude={"text"}),
                     sha256=sha256,
                     original_text=text,
@@ -106,11 +130,13 @@ class EvidenceRepository:
                 )
             )
         return {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "analysis_id": record["analysis_id"],
             "report_request_id": submission.report_request_id,
             "subject": submission.subject.model_dump(mode="json") if submission.subject else None,
-            "source": submission.source.model_dump(mode="json"),
+            "source_id": submission.source_id,
+            "source_type": submission.source_type,
+            "attributes": submission.attributes,
             "status": record["status"],
             "created": created,
             "results_url": f"/api/v1/integrations/blackglass/evidence/{record['analysis_id']}",
@@ -132,6 +158,7 @@ class EvidenceRepository:
         )
         if record is None:
             raise EvidenceNotFound("analysis not found")
+        source_id, source_type, attributes = _source_fields(record["submission"])
         items = (
             (
                 await self.session.execute(
@@ -146,7 +173,7 @@ class EvidenceRepository:
             .all()
         )
         return {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "analysis_id": analysis_id,
             "report_request_id": record["submission"].get("report_request_id"),
             "subject": record["submission"].get("subject"),
@@ -155,7 +182,9 @@ class EvidenceRepository:
                 "batch_sequence": record["submission"].get("batch_sequence"),
                 "final_batch": record["submission"].get("final_batch", False),
             },
-            "source": record["submission"]["source"],
+            "source_id": source_id,
+            "source_type": source_type,
+            "attributes": attributes,
             "stream": record["submission"].get("stream"),
             "media_uuid": record["media_uuid"],
             "source_sha256": record["sha256"],
@@ -218,8 +247,9 @@ class EvidenceRepository:
             )
         )
         event_id = uuid4()
+        source_id, source_type, attributes = _source_fields(row["submission"])
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "event_id": str(event_id),
             "event_type": "analysis.updated",
             "emitted_at": now.isoformat(),
@@ -233,7 +263,9 @@ class EvidenceRepository:
             },
             "revision": revision,
             "status": status,
-            "source": row["submission"]["source"],
+            "source_id": source_id,
+            "source_type": source_type,
+            "attributes": attributes,
             "stream": row["submission"].get("stream"),
             "media_uuid": str(row["media_uuid"]) if row["media_uuid"] else None,
             "source_sha256": row["sha256"],

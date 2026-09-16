@@ -12,7 +12,7 @@ type Piece = {
 type Finding = { statement: string; citations: Array<{ evidence_id: string; quote: string }> };
 type Result = {
   analysis_id: string; status: string; revision: number; storage_mode: string;
-  source: { system: string; object_id: string }; source_sha256: string;
+  source_id: string; source_type: string; attributes: Record<string, unknown>; source_sha256: string;
   evidence: Piece[]; findings?: Finding[]; contradictions?: Finding[];
   warnings?: Array<{ stage: string; code: string }>;
 };
@@ -91,7 +91,13 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     if (useFile && (!file || file.size > 50 * 1024 * 1024)) return setError("Choose a file under 50 MiB.");
     if (!useFile && !text.trim()) return setError("Enter source text.");
     setBusy(true); setError(""); setResult(null);
-    const metadata = { source: { system: "blackglass-prod", object_type: useFile ? "media" : "text", object_id: record.trim() }, options: { language } };
+    const metadata = {
+      schema_version: "1.1",
+      source_id: record.trim(),
+      source_type: useFile ? "media" : "text",
+      attributes: { source_system: "blackglass-prod" },
+      options: { language },
+    };
     try {
       let init: RequestInit;
       if (useFile && file) {
@@ -147,7 +153,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     </section>
     {error && <p role="alert" className="panel p-4 text-red-400">{error}</p>}
     {result && <section className="panel space-y-5 p-6" aria-live="polite">
-      <h2 className="text-lg font-semibold">{result.source.object_id} · {result.status} · revision {result.revision}</h2>
+      <h2 className="text-lg font-semibold">{result.source_id} · {result.status} · revision {result.revision}</h2>
       <p className="text-sm text-ink-muted">Findings are unreviewed model output. Citations verify referenced excerpts, not the truth of a conclusion.</p>
       <a className="underline" href={`${base}/${result.analysis_id}/content`}>Download original evidence</a>
       <a className="ml-4 underline" href={`${base}/${result.analysis_id}/report`} download>Download BlackGlass report JSON</a>

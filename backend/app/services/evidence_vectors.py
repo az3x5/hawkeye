@@ -135,7 +135,11 @@ async def hybrid_search(
     return [
         {
             "analysis_id": rows[key]["analysis_id"],
-            "source": rows[key]["submission"]["source"],
+            "source_id": rows[key]["submission"].get("source_id")
+            or rows[key]["submission"].get("source", {}).get("object_id"),
+            "source_type": rows[key]["submission"].get("source_type")
+            or rows[key]["submission"].get("source", {}).get("object_type"),
+            "attributes": rows[key]["submission"].get("attributes", {}),
             "evidence": rows[key]["body"],
             "rank_score": ranks[key],
         }

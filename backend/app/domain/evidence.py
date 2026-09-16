@@ -6,7 +6,7 @@ import hashlib
 import json
 import unicodedata
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -42,16 +42,6 @@ class Contract(BaseModel):
     """Reject silently ignored fields in integration requests."""
 
     model_config = ConfigDict(extra="forbid")
-
-
-class EvidenceSource(Contract):
-    """One BlackGlass record, independent of the content's hash."""
-
-    system: str = Field(default="blackglass-prod", min_length=1, max_length=128)
-    object_type: str = Field(min_length=1, max_length=64)
-    object_id: str = Field(min_length=1, max_length=256)
-    source_url: str | None = Field(default=None, max_length=2048)
-    collected_at: datetime | None = None
 
 
 class ReportSubject(Contract):
@@ -93,8 +83,10 @@ class StreamSegment(Contract):
 class Submission(Contract):
     """Metadata used by text and multipart file submissions."""
 
-    schema_version: Literal["1.0"] = "1.0"
-    source: EvidenceSource
+    schema_version: Literal["1.0", "1.1"] = "1.1"
+    source_id: str = Field(min_length=1, max_length=256)
+    source_type: str = Field(min_length=1, max_length=64)
+    attributes: dict[str, Any] = Field(default_factory=dict)
     options: AnalysisOptions = Field(default_factory=AnalysisOptions)
     stream: StreamSegment | None = None
     report_request_id: str | None = Field(default=None, min_length=1, max_length=256)
@@ -103,6 +95,71 @@ class Submission(Contract):
     batch_sequence: int | None = Field(default=None, ge=0)
     final_batch: bool = False
     ingest_request_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_legacy_source(cls, value: Any) -> Any:
+        """Accept schema 1.0 briefly while storing only the indexed flat identity."""
+        if not isinstance(value, dict) or "source" not in value:
+            return value
+        source = value.get("source")
+        if not isinstance(source, dict):
+            return value
+        flattened = dict(value)
+        flattened.pop("source", None)
+        flattened["schema_version"] = "1.1"
+        flattened.setdefault("source_id", source.get("object_id"))
+        flattened.setdefault("source_type", source.get("object_type"))
+        attributes = dict(flattened.get("attributes") or {})
+        mapping = {
+            "system": "source_system",
+            "source_url": "source_url",
+            "collected_at": "collected_at",
+            "published_at": "published_at",
+            "collector_version": "collector_version",
+        }
+        for old, new in mapping.items():
+            if source.get(old) is not None:
+                attributes.setdefault(new, source[old])
+        flattened["attributes"] = attributes
+        return flattened
+
+    @model_validator(mode="after")
+    def validate_source_attributes(self) -> Submission:
+        """Bound optional provenance fields without making them query keys."""
+        limits = {
+            "source_system": 128,
+            "source_url": 2048,
+            "collector_version": 128,
+            "published_at": 64,
+            "collected_at": 64,
+        }
+        for name, maximum in limits.items():
+            value = self.attributes.get(name)
+            if value is not None and (
+                not isinstance(value, str) or not value or len(value) > maximum
+            ):
+                raise ValueError(
+                    f"attributes.{name} must be a non-empty string up to {maximum} characters"
+                )
+        for name in ("collected_at", "published_at"):
+            raw = self.attributes.get(name)
+            if raw is not None:
+                parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    raise ValueError(f"attributes.{name} requires a timezone")
+        return self
+
+    def source_system(self) -> str:
+        """Return optional collector name without making it part of source identity."""
+        return str(self.attributes.get("source_system", "blackglass-prod"))
+
+    def source_datetime(self, name: Literal["collected_at", "published_at"]) -> datetime | None:
+        """Parse an optional ISO-8601 provenance timestamp."""
+        raw = self.attributes.get(name)
+        if raw is None:
+            return None
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
 
 
 class TextSubmission(Submission):

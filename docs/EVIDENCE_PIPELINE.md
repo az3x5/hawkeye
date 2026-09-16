@@ -46,7 +46,7 @@ All paths begin `/api/v1/integrations/blackglass`.
 | GET `/evidence-search?q=...&limit=10` | `media:read` | Lexical + semantic evidence retrieval |
 
 The authenticated token **subject** owns each analysis. Read access requires
-both the scope and the same subject. A UUID or asserted `source.system` does not
+both the scope and the same subject. A UUID or asserted `attributes.source_system` does not
 grant access to another account's content. Use a stable BlackGlass service
 subject across token rotation and issue it the required scopes. No automatic
 administrator cross-owner bypass is provided by these new endpoints.
@@ -63,23 +63,23 @@ Content-Type: multipart/form-data
 ```
 
 The form has a required `metadata` JSON string and zero to twenty `files`
-parts. The metadata must include `report_request_id`, `subject`, and `source`;
+parts. The metadata must include `report_request_id`, `subject`, `source_id`, and `source_type`;
 it may include `text`. At least text or one file is required. One request may
 carry both a post body and its attachments:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "report_request_id": "BG-REPORT-123",
   "subject": {
     "subject_type": "social_profile",
     "subject_id": "BG-PROFILE-456",
     "display_label": "Profile under review"
   },
-  "source": {
-    "system": "blackglass-prod",
-    "object_type": "post",
-    "object_id": "POST-1001",
+  "source_id": "POST-1001",
+  "source_type": "post",
+  "attributes": {
+    "source_system": "blackglass-prod",
     "source_url": "https://blackglass.example/posts/POST-1001",
     "collected_at": "2026-09-15T08:00:00Z"
   },
@@ -95,6 +95,11 @@ carry both a post body and its attachments:
 }
 ```
 
+`source_id` and `source_type` are indexed PostgreSQL columns used for exact lookup and
+deduplication. Optional collector details belong in `attributes`; clients must not send a nested
+`source` object in new integrations. Schema 1.0 nested requests remain accepted temporarily and
+are normalized to the flat schema before persistence.
+
 The 202 response contains an `items` array: one analysis acknowledgement for
 the text and one for each file. All items retain the same report request,
 subject, source and batch correlation. Exact replays converge on the same
@@ -108,7 +113,8 @@ segments.
 Send `multipart/form-data` to `/evidence/media` with:
 
 * `file`: the original image, audio, video or document bytes;
-* `metadata`: a JSON string containing the same `schema_version`, `source`,
+* `metadata`: a JSON string containing the same `schema_version`, `source_id`, `source_type`,
+  `attributes`,
   `options`, and optional `stream` fields used by text ingestion.
 
 The acknowledgement is returned only after the original is durably stored and
@@ -120,11 +126,11 @@ idempotent.
 
 ```json
 {
-  "schema_version": "1.0",
-  "source": {
-    "system": "blackglass-prod",
-    "object_type": "video",
-    "object_id": "BG-VIDEO-123",
+  "schema_version": "1.1",
+  "source_id": "BG-VIDEO-123",
+  "source_type": "video",
+  "attributes": {
+    "source_system": "blackglass-prod",
     "collected_at": "2026-09-14T10:00:00Z"
   },
   "object": {
@@ -173,7 +179,8 @@ source/options envelope. Source URLs are provenance only and are never fetched.
 
 ### Acknowledgement
 
-HTTP 202 returns `schema_version`, `analysis_id`, `source`, `status`, `created`,
+HTTP 202 returns `schema_version`, `analysis_id`, `source_id`, `source_type`, `attributes`,
+`status`, `created`,
 and `results_url`. The deduplication key contains authenticated owner, source
 record, content hash, options, stream metadata and pipeline version. Identical
 bytes associated with different BlackGlass records retain distinct mappings.
@@ -243,7 +250,7 @@ set `EVIDENCE_DELIVERY_ENABLED=true` and the receiver settings in `.env`.
 No delivery worker is started by the ordinary `evidence` profile.
 
 The receiver gets a complete `analysis.updated` snapshot with stable `event_id`,
-`analysis_id`, `revision`, original `source.object_id`, optional stream metadata,
+`analysis_id`, `revision`, original `source_id`, optional stream metadata,
 evidence, findings and warnings. Headers:
 The payload also contains `report`, a BlackGlass-compatible schema-2 report with
 31 ordered blocks. Unsupported analytical sections say that cited evidence is

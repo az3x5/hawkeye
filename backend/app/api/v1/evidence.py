@@ -68,11 +68,11 @@ async def _store_media_submission(
             IngestRequest(
                 data=data,
                 source_type=SourceType.BLACKGLASS,
-                source_system=body.source.system,
-                external_source_id=body.source.object_id,
+                source_system=body.source_system(),
+                external_source_id=body.source_id,
                 declared_content_type=declared_content_type,
-                source_url=body.source.source_url,
-                collected_at=body.source.collected_at,
+                source_url=body.attributes.get("source_url"),
+                collected_at=body.source_datetime("collected_at"),
                 submitted_by=principal.subject,
             )
         )
@@ -246,11 +246,13 @@ async def unified_ingest(
             raise InvalidMediaError(str(exc), field=upload.filename or "files") from exc
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "request_id": idempotency_key,
         "report_request_id": body.report_request_id,
         "subject": body.subject.model_dump(mode="json"),
-        "source": body.source.model_dump(mode="json"),
+        "source_id": body.source_id,
+        "source_type": body.source_type,
+        "attributes": body.attributes,
         "accepted_items": len(results),
         "items": results,
     }
@@ -307,7 +309,9 @@ async def submit_object_batch(
                 {
                     "index": index,
                     "accepted": False,
-                    "source": item.source.model_dump(mode="json"),
+                    "source_id": item.source_id,
+                    "source_type": item.source_type,
+                    "attributes": item.attributes,
                     "error": "original_unavailable_or_manifest_invalid",
                 }
             )

@@ -18,7 +18,9 @@ type Asset = {
 type IngestResult = {
   media: Asset;
   media_source: { source_uuid: string; source_system: string; external_source_id?: string | null };
-  source: { system: string; object_type: string; object_id: string };
+  source_id: string;
+  source_type: string;
+  attributes: Record<string, unknown>;
   subject: { type: string; id: string };
   created: boolean;
   status: "accepted" | "already_exists";
@@ -84,8 +86,8 @@ export function BlackGlassIntake({ canRead }: { canRead: boolean }) {
     const form = new FormData();
     form.set("file", file);
     form.set("source_system", system.trim());
-    form.set("external_object_id", externalId.trim());
-    form.set("external_object_type", objectType);
+    form.set("source_id", externalId.trim());
+    form.set("source_type", objectType);
     form.set("classification", classification);
     form.set("collector_version", "hawkeye-web-manual/1");
     if (sourceUrl.trim()) form.set("source_url", sourceUrl.trim());
@@ -151,7 +153,7 @@ export function BlackGlassIntake({ canRead }: { canRead: boolean }) {
 
       <aside className="space-y-4">
         <div className="panel p-4"><div className="flex items-center gap-2"><ShieldCheck className="size-4 text-accept" /><h2 className="text-sm font-semibold text-ink">Ingestion guarantees</h2></div><ul className="mt-3 space-y-2 text-sm text-ink-muted"><li>File type is detected from its bytes.</li><li>Repeated content converges on one asset.</li><li>The BlackGlass record ID prevents duplicate provenance.</li><li>Every delivery is attributed to your account.</li><li>Source URLs are stored as evidence metadata, never downloaded.</li></ul></div>
-        {result ? <div className="panel border-accept/25 p-4"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><CheckCircle2 className="size-4 text-accept" /><h2 className="text-sm font-semibold text-ink">Delivery accepted</h2></div><StatusBadge tone="accept">{result.status === "accepted" ? "accepted" : "already held"}</StatusBadge></div><dl className="mt-4 grid gap-3 text-xs"><div><dt className="text-ink-faint">EagleEye asset</dt><dd className="mt-1 break-all font-mono text-ink">{result.subject.id}</dd></div><div><dt className="text-ink-faint">Source record</dt><dd className="mt-1 break-all font-mono text-ink">{result.source.object_id}</dd></div><div><dt className="text-ink-faint">SHA-256</dt><dd className="mt-1 break-all font-mono text-ink-muted">{result.media.sha256}</dd></div></dl><div className="mt-4 flex flex-wrap gap-2">{result.analysis_routes.map((route) => <StatusBadge key={route.capability} tone={route.state === "queued" || route.state === "available_on_demand" ? "info" : "neutral"}>{route.capability}: {route.state.replaceAll("_", " ")}</StatusBadge>)}</div></div> : null}
+        {result ? <div className="panel border-accept/25 p-4"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><CheckCircle2 className="size-4 text-accept" /><h2 className="text-sm font-semibold text-ink">Delivery accepted</h2></div><StatusBadge tone="accept">{result.status === "accepted" ? "accepted" : "already held"}</StatusBadge></div><dl className="mt-4 grid gap-3 text-xs"><div><dt className="text-ink-faint">EagleEye asset</dt><dd className="mt-1 break-all font-mono text-ink">{result.subject.id}</dd></div><div><dt className="text-ink-faint">Source record</dt><dd className="mt-1 break-all font-mono text-ink">{result.source_id}</dd></div><div><dt className="text-ink-faint">SHA-256</dt><dd className="mt-1 break-all font-mono text-ink-muted">{result.media.sha256}</dd></div></dl><div className="mt-4 flex flex-wrap gap-2">{result.analysis_routes.map((route) => <StatusBadge key={route.capability} tone={route.state === "queued" || route.state === "available_on_demand" ? "info" : "neutral"}>{route.capability}: {route.state.replaceAll("_", " ")}</StatusBadge>)}</div></div> : null}
       </aside>
     </div>
 

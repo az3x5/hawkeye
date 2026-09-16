@@ -23,10 +23,11 @@ BlackGlass can push directly to EagleEye without using the operator UI:
 - `GET /api/v1/integrations/blackglass/aws/status`
 - `POST /api/v1/integrations/blackglass/aws/faces/import`
 
-Media delivery is multipart and requires `external_object_id`,
-`external_object_type`, a file, and an optional JSON or comma-separated
+Media delivery is multipart and requires `source_id`,
+`source_type`, a file, and an optional JSON or comma-separated
 `requested_analyses` field. Text delivery uses JSON with the same versioned
-source envelope. Both return an EagleEye subject UUID, idempotency state, and
+flat source identity plus optional `attributes`. Both return an EagleEye subject UUID,
+idempotency state, and
 an honest route for every requested analysis.
 
 When media analyses are omitted, EagleEye chooses them after inspecting the
@@ -86,8 +87,8 @@ scoped service credential and the backend API directly:
 curl -sS -X POST https://eagleeye.example/api/v1/integrations/blackglass/media \
   -H "Authorization: Bearer $EAGLEEYE_MEDIA_TOKEN" \
   -F source_system=blackglass-prod \
-  -F external_object_id=bg-4471 \
-  -F external_object_type=video \
+  -F source_id=bg-4471 \
+  -F source_type=video \
   -F classification=internal \
   -F file=@/path/to/exported-evidence.mp4
 ```
