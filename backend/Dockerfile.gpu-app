@@ -1,0 +1,10 @@
+# Refresh application code without reinstalling the large audited GPU runtime.
+# Build the full Dockerfile.gpu first whenever dependencies or CUDA versions change.
+ARG GPU_IMAGE=hawkeye-api:gpu
+FROM ${GPU_IMAGE}
+
+USER root
+COPY app /srv/app
+COPY migrations /srv/migrations
+COPY alembic.ini /srv/alembic.ini
+USER faceid
