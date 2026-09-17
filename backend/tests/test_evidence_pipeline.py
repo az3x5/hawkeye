@@ -101,6 +101,25 @@ def test_ollama_findings_schema_is_flat_and_covers_intelligence_sections() -> No
     assert "osp-screening" in sections
 
 
+def test_partial_summary_does_not_discard_successful_batches() -> None:
+    from app.evidence_worker import failed_stages_require_retry
+
+    result = {
+        "warnings": [{"stage": "summary", "code": "batch_16_failed_or_citations_rejected"}],
+        "summary_provenance": {
+            "successful_batches": "15",
+            "total_batches": "16",
+        },
+    }
+
+    assert not failed_stages_require_retry(result)
+    result["summary_provenance"]["successful_batches"] = "0"
+    assert failed_stages_require_retry(result)
+    result["summary_provenance"]["successful_batches"] = "15"
+    result["warnings"].append({"stage": "visual", "code": "model_unavailable_or_failed"})
+    assert failed_stages_require_retry(result)
+
+
 def test_record_and_owner_are_part_of_idempotency() -> None:
     original = submission()
     assert submission_key("a", original, "f" * 64) == submission_key("a", original, "f" * 64)

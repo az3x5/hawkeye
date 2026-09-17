@@ -38,6 +38,24 @@ from app.services.language_embeddings import MultilingualE5Embedder
 logger = logging.getLogger(__name__)
 
 
+def failed_stages_require_retry(result: dict[str, Any]) -> bool:
+    """Retry transient failures unless a multi-batch summary has usable output.
+
+    Re-running a long profile report from its first batch because one later
+    summary batch was rejected wastes the successful, citation-validated
+    batches.  Those runs are intentionally published as partial so the UI and
+    receiver can show the supported findings together with the warning.
+    """
+    failures = [warning for warning in result.get("warnings", []) if "failed" in warning["code"]]
+    if not failures:
+        return False
+    provenance = result.get("summary_provenance") or {}
+    successful_batches = int(provenance.get("successful_batches", "0"))
+    if successful_batches:
+        failures = [warning for warning in failures if warning.get("stage") != "summary"]
+    return bool(failures)
+
+
 async def deliver_event(settings: EvidenceSettings, payload: dict[str, Any]) -> None:
     """Authenticate to a fixed receiver; retry the same event ID after lost acknowledgements."""
     url = urlsplit(settings.webhook_url or "")
@@ -208,7 +226,7 @@ class EvidenceWorker:
             mime=mime,
         )
         # Re-run transiently failed stages before settling on an explicit partial result.
-        failed_stages = any("failed" in w["code"] for w in result["warnings"])
+        failed_stages = failed_stages_require_retry(result)
         if failed_stages and reservation.attempt_number < reservation.job.max_attempts:
             raise RuntimeError("one or more inference stages failed; retrying")
         if items:
