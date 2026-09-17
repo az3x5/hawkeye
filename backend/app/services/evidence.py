@@ -140,6 +140,7 @@ class EvidenceRepository:
             "status": record["status"],
             "created": created,
             "results_url": f"/api/v1/integrations/blackglass/evidence/{record['analysis_id']}",
+            "report_page_url": f"/evidence/{record['analysis_id']}",
         }
 
     async def get(self, analysis_id: UUID, owner: str | None) -> dict[str, Any]:

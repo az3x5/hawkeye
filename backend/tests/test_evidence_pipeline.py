@@ -446,6 +446,7 @@ async def test_http_ingestion_authentication_and_ownership(db, settings) -> None
         authenticate(app, Scope.LANGUAGE, Scope.MEDIA_READ, subject="owner-a")
         accepted = await client.post(endpoint, json=submission().model_dump(mode="json"))
         assert accepted.status_code == 202
+        assert accepted.json()["report_page_url"] == (f"/evidence/{accepted.json()['analysis_id']}")
         status_path = "/api/v1/integrations/blackglass/evidence/status"
         status = await client.get(status_path)
         assert status.status_code == 200
