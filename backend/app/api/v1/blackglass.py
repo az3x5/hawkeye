@@ -794,6 +794,7 @@ async def analyze_blackglass_profile(
                 "source_system": "blackglass-prod",
                 "profile_id": profile_id,
                 "record_count": len(rows),
+                "report_profile": "full-intelligence-v1",
             },
             options=AnalysisOptions(language="mixed", summarize=True),
             text=corpus,

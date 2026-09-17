@@ -40,7 +40,11 @@ from app.domain.evidence import (
 )
 from app.domain.processing import JobLeaseError
 from app.services.evidence import EvidenceNotFound, EvidenceRepository, content_hash
-from app.services.evidence_processor import EvidenceProcessor, EvidenceSettings
+from app.services.evidence_processor import (
+    EvidenceProcessor,
+    EvidenceSettings,
+    findings_output_schema,
+)
 from app.services.evidence_report import SECTIONS, build_blackglass_report
 from app.services.evidence_source import SharedEvidenceSource
 from app.services.evidence_vectors import hybrid_search
@@ -81,6 +85,20 @@ def test_manifest_and_locator_validation() -> None:
                 "text": "   ",
             }
         )
+
+
+def test_ollama_findings_schema_is_flat_and_covers_intelligence_sections() -> None:
+    schema = findings_output_schema()
+    encoded = json.dumps(schema)
+    sections = schema["properties"]["findings"]["items"]["properties"]["section"]["enum"]
+
+    assert "$ref" not in encoded
+    assert "format" not in encoded
+    assert "osp-behaviour-pattern" in sections
+    assert "osp-behaviour-timeline" in sections
+    assert "osp-associates" in sections
+    assert "osp-decision-risk" in sections
+    assert "osp-screening" in sections
 
 
 def test_record_and_owner_are_part_of_idempotency() -> None:

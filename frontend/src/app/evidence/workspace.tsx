@@ -9,7 +9,7 @@ type Piece = {
   translations: Array<{ task: string; text: string }>;
   provenance: Record<string, string>;
 };
-type Finding = { statement: string; citations: Array<{ evidence_id: string; quote: string }> };
+type Finding = { statement: string; section: string; citations: Array<{ evidence_id: string; quote: string }> };
 type Result = {
   analysis_id: string; status: string; revision: number; storage_mode: string;
   source_id: string; source_type: string; attributes: Record<string, unknown>; source_sha256: string;
@@ -248,6 +248,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
       <p className="break-all text-xs">SHA-256: {result.source_sha256} · {result.storage_mode}</p>
       {result.warnings?.map((warning, i) => <p key={i} className="text-sm text-amber-400">{warning.stage}: {warning.code.replaceAll("_", " ")}</p>)}
       {[...(result.findings ?? []), ...(result.contradictions ?? [])].map((finding, i) => <article key={i} className="border-l-2 border-cyan-500 pl-4">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-cyan-300">{finding.section.replace(/^osp-/, "").replaceAll("-", " ")}</p>
         <p dir="auto">{finding.statement}</p>
         {finding.citations.map((citation, j) => <a className="block text-sm underline" key={j} href={`#evidence-${citation.evidence_id}`}><span dir="auto">“{citation.quote}”</span></a>)}
       </article>)}
