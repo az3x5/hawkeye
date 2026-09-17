@@ -44,6 +44,7 @@ from app.services.evidence_processor import (
     EvidenceProcessor,
     EvidenceSettings,
     findings_output_schema,
+    validated_findings_subset,
 )
 from app.services.evidence_report import SECTIONS, build_blackglass_report
 from app.services.evidence_source import SharedEvidenceSource
@@ -118,6 +119,32 @@ def test_partial_summary_does_not_discard_successful_batches() -> None:
     result["summary_provenance"]["successful_batches"] = "15"
     result["warnings"].append({"stage": "visual", "code": "model_unavailable_or_failed"})
     assert failed_stages_require_retry(result)
+
+
+def test_validated_findings_subset_discards_only_bad_claim() -> None:
+    run_id = uuid4()
+    body = submission()
+    piece = __import__("asyncio").run(
+        EvidenceProcessor(None, EvidenceSettings()).process(run_id, body, text=body.text)
+    )[0][0]
+    good = Finding(
+        statement="Meeting observation",
+        section="osp-behaviour-timeline",
+        confidence=0.8,
+        basis="explicit",
+        citations=[Citation(evidence_id=piece.evidence_id, quote="meeting is at nine")],
+    )
+    bad = good.model_copy(
+        update={"citations": [Citation(evidence_id=piece.evidence_id, quote="not present")]}
+    )
+
+    accepted, rejected = validated_findings_subset(
+        Findings(findings=[good], contradictions=[bad]), [piece]
+    )
+
+    assert accepted.findings == [good]
+    assert accepted.contradictions == []
+    assert rejected == 1
 
 
 def test_record_and_owner_are_part_of_idempotency() -> None:

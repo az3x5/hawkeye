@@ -54,14 +54,14 @@ def findings_output_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "evidence_id": {"type": "string"},
-            "quote": {"type": "string", "maxLength": 120},
+            "quote": {"type": "string", "maxLength": 80},
         },
         "required": ["evidence_id", "quote"],
     }
     finding = {
         "type": "object",
         "properties": {
-            "statement": {"type": "string", "maxLength": 180},
+            "statement": {"type": "string", "maxLength": 120},
             "section": {
                 "type": "string",
                 "enum": [
@@ -116,11 +116,39 @@ def findings_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "findings": {"type": "array", "items": finding, "maxItems": 2},
+            "findings": {"type": "array", "items": finding, "maxItems": 1},
             "contradictions": {"type": "array", "items": finding, "maxItems": 1},
         },
         "required": ["findings", "contradictions"],
     }
+
+
+def validated_findings_subset(
+    candidate: Findings, evidence: list[EvidencePiece]
+) -> tuple[Findings, int]:
+    """Keep independently valid cited claims instead of rejecting their whole batch."""
+    accepted_findings = []
+    accepted_contradictions = []
+    rejected = 0
+    for finding in candidate.findings:
+        try:
+            validate_citations(Findings(findings=[finding]), evidence)
+            accepted_findings.append(finding)
+        except ValueError:
+            rejected += 1
+    for contradiction in candidate.contradictions:
+        try:
+            validate_citations(Findings(contradictions=[contradiction]), evidence)
+            accepted_contradictions.append(contradiction)
+        except ValueError:
+            rejected += 1
+    return (
+        Findings(
+            findings=accepted_findings,
+            contradictions=accepted_contradictions,
+        ),
+        rejected,
+    )
 
 
 async def media_command(*args: str) -> bytes:
@@ -456,7 +484,7 @@ class EvidenceProcessor:
                                     "activity timeline; repeated behaviour and communication "
                                     "patterns; explicit associations and interactions; observable "
                                     "risk indicators; and suspicious-activity indicators. "
-                                    "Return at most two concise findings and one concise "
+                                    "Return at most one concise finding and one concise "
                                     "contradiction for this batch. Omit unsupported dimensions. "
                                     "Identity requires "
                                     "an explicit self-identification, account field, or "
@@ -477,8 +505,13 @@ class EvidenceProcessor:
                         format=findings_output_schema(),
                         options={"temperature": 0, "num_predict": 256, "num_ctx": 8192},
                     )
-                    batch_findings = Findings.model_validate_json(result["text"])
-                    validate_citations(batch_findings, batch)
+                    candidate = Findings.model_validate_json(result["text"])
+                    batch_findings, rejected = validated_findings_subset(candidate, batch)
+                    if rejected:
+                        warn(
+                            "summary",
+                            f"batch_{offset // summary_batch_size + 1}_invalid_claim_discarded",
+                        )
                     collected_findings.extend(batch_findings.findings)
                     collected_contradictions.extend(batch_findings.contradictions)
                     successful_batches += 1
