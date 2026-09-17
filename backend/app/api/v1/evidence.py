@@ -46,6 +46,11 @@ _MAX_UNIFIED_FILES = 20
 _MAX_UNIFIED_BYTES = 100 * 1024**2
 
 
+def _visible_owner(principal: Principal) -> str | None:
+    """Admins may monitor service-owned reports; other callers remain owner-scoped."""
+    return None if principal.has(Scope.ADMIN) else principal.subject
+
+
 async def _store_media_submission(
     *,
     data: bytes,
@@ -270,6 +275,68 @@ async def event_page(
         return await EvidenceRepository(session).event_page(principal.subject, cursor, limit)
 
 
+@router.get("")
+async def report_page(
+    request: Request,
+    principal: Annotated[Principal, Depends(require(Scope.MEDIA_READ))],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """List persisted report pages visible to the caller, newest first."""
+    conditions = []
+    owner = _visible_owner(principal)
+    if owner is not None:
+        conditions.append(runs.c.owner == owner)
+    async with _postgres(request).session() as session:
+        total = (
+            await session.execute(select(func.count()).select_from(runs).where(*conditions))
+        ).scalar_one()
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        runs.c.analysis_id,
+                        runs.c.owner,
+                        runs.c.source_id,
+                        runs.c.source_type,
+                        runs.c.submission,
+                        runs.c.status,
+                        runs.c.revision,
+                        runs.c.created_at,
+                        runs.c.updated_at,
+                    )
+                    .where(*conditions)
+                    .order_by(runs.c.created_at.desc(), runs.c.analysis_id.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return {
+        "items": [
+            {
+                "analysis_id": row["analysis_id"],
+                "report_request_id": row["submission"].get("report_request_id"),
+                "subject": row["submission"].get("subject"),
+                "source_id": row["source_id"],
+                "source_type": row["source_type"],
+                "owner": row["owner"],
+                "status": row["status"],
+                "revision": row["revision"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "page_url": f"/evidence/{row['analysis_id']}",
+            }
+            for row in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
 @router.post("/objects", status_code=202)
 async def submit_object(
     body: ObjectSubmission,
@@ -326,7 +393,7 @@ async def get_result(
 ) -> dict[str, Any]:
     """Return source-linked excerpts and unreviewed findings for one owned run."""
     async with _postgres(request).session() as session:
-        return await EvidenceRepository(session).get(analysis_id, principal.subject)
+        return await EvidenceRepository(session).get(analysis_id, _visible_owner(principal))
 
 
 @router.get("/{analysis_id}/report")
@@ -337,7 +404,7 @@ async def generated_report(
 ) -> dict[str, Any]:
     """Return a BlackGlass schema-2 report derived from committed evidence."""
     async with _postgres(request).session() as session:
-        analysis = await EvidenceRepository(session).get(analysis_id, principal.subject)
+        analysis = await EvidenceRepository(session).get(analysis_id, _visible_owner(principal))
     return build_blackglass_report(analysis)
 
 
@@ -352,7 +419,7 @@ async def original_content(
     from app.services.evidence import EvidenceNotFound
 
     async with _postgres(request).session() as session:
-        result = await EvidenceRepository(session).get(analysis_id, principal.subject)
+        result = await EvidenceRepository(session).get(analysis_id, _visible_owner(principal))
         source_object = (
             await session.execute(
                 select(runs.c.source_object).where(

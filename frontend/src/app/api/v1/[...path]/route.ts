@@ -27,6 +27,7 @@ const READABLE = [
   /^media$/,
   /^integrations\/blackglass\/capabilities$/,
   /^integrations\/blackglass\/documents$/,
+  /^integrations\/blackglass\/evidence$/,
   /^integrations\/blackglass\/evidence\/[0-9a-f-]{36}(\/(content|report))?$/,
   /^integrations\/blackglass\/evidence\/events$/,
   /^integrations\/blackglass\/evidence\/status$/,

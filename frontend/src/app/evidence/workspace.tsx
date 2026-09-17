@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 type Piece = {
@@ -28,6 +30,12 @@ type ImportedDocument = {
 type ImportedDocumentPage = {
   items: ImportedDocument[]; total: number; limit: number; offset: number; profiles: Record<string, number>;
 };
+type ReportSummary = {
+  analysis_id: string; report_request_id: string | null; subject: { display_label?: string } | null;
+  source_id: string; source_type: string; owner: string; status: string; revision: number;
+  created_at: string; updated_at: string; page_url: string;
+};
+type ReportPage = { items: ReportSummary[]; total: number; limit: number; offset: number };
 const base = "/api/v1/integrations/blackglass/evidence";
 const documentsBase = "/api/v1/integrations/blackglass/documents";
 const field = "rounded border border-white/15 bg-black/10 p-3 text-sm";
@@ -39,16 +47,16 @@ async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; canMedia: boolean }) {
+export function EvidenceWorkspace({ canText, canMedia, initialAnalysisId = "", reportOnly = false }: { canText: boolean; canMedia: boolean; initialAnalysisId?: string; reportOnly?: boolean }) {
+  const router = useRouter();
   const [record, setRecord] = useState("");
   const [text, setText] = useState("");
   const [language, setLanguage] = useState("unknown");
   const [file, setFile] = useState<File | null>(null);
-  const [active, setActive] = useState("");
-  const [refresh, setRefresh] = useState(0);
+  const [active, setActive] = useState(initialAnalysisId);
   const [workflow, setWorkflow] = useState<WorkflowStatus | null>(null);
   const [statusError, setStatusError] = useState("");
-  const [lookup, setLookup] = useState("");
+  const [lookup, setLookup] = useState(initialAnalysisId);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,8 +68,29 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
   const [appliedProfile, setAppliedProfile] = useState("");
   const [documentOffset, setDocumentOffset] = useState(0);
   const [profileAnalysisBusy, setProfileAnalysisBusy] = useState(false);
+  const [reports, setReports] = useState<ReportPage | null>(null);
+  const [reportsError, setReportsError] = useState("");
 
   useEffect(() => {
+    if (reportOnly) return;
+    let stopped = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    async function pollReports() {
+      try {
+        const page = await readJson<ReportPage>(`${base}?limit=50`);
+        if (!stopped) { setReports(page); setReportsError(""); }
+      } catch (caught) {
+        if (!stopped) setReportsError(caught instanceof Error ? caught.message : "Unable to load reports.");
+      } finally {
+        if (!stopped) timeout = setTimeout(pollReports, 5000);
+      }
+    }
+    void pollReports();
+    return () => { stopped = true; clearTimeout(timeout); };
+  }, [reportOnly]);
+
+  useEffect(() => {
+    if (reportOnly) return;
     let stopped = false;
     let timeout: ReturnType<typeof setTimeout>;
     async function pollStatus() {
@@ -76,10 +105,10 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     }
     void pollStatus();
     return () => { stopped = true; clearTimeout(timeout); };
-  }, []);
+  }, [reportOnly]);
 
   useEffect(() => {
-    if (!canText) return;
+    if (!canText || reportOnly) return;
     let stopped = false;
     let timeout: ReturnType<typeof setTimeout>;
     async function pollDocuments() {
@@ -96,7 +125,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     }
     void pollDocuments();
     return () => { stopped = true; clearTimeout(timeout); };
-  }, [appliedProfile, canText, documentOffset]);
+  }, [appliedProfile, canText, documentOffset, reportOnly]);
 
   useEffect(() => {
     if (!active) return;
@@ -119,7 +148,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     }
     void poll();
     return () => { stopped = true; clearTimeout(timeout); };
-  }, [active, refresh]);
+  }, [active]);
 
   async function submit(useFile: boolean) {
     if (!record.trim()) return setError("Enter the original BlackGlass record ID.");
@@ -140,9 +169,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
         init = { method: "POST", body: form };
       } else init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...metadata, text }) };
       const accepted = await readJson<{ analysis_id: string }>(`${base}/${useFile ? "media" : "text"}`, init);
-      setActive(accepted.analysis_id); setLookup(accepted.analysis_id);
-      setRefresh(value => value + 1);
-      setResult(await readJson<Result>(`${base}/${accepted.analysis_id}`));
+      openReport(accepted.analysis_id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Submission failed."); }
     finally { setBusy(false); }
   }
@@ -158,6 +185,13 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
   const profileIds = Object.keys(documents?.profiles ?? {});
   const reportProfile = appliedProfile || (profileIds.length === 1 ? profileIds[0] : "");
 
+  function openReport(analysisId: string) {
+    const value = analysisId.trim();
+    if (!value) return;
+    setLookup(value); setActive(value); setResult(null);
+    router.push(`/evidence/${encodeURIComponent(value)}`);
+  }
+
   async function analyzeProfile() {
     if (!reportProfile) return setError("Filter to one profile before generating its report.");
     setProfileAnalysisBusy(true); setError(""); setResult(null);
@@ -166,14 +200,29 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
         `/api/v1/integrations/blackglass/profiles/${encodeURIComponent(reportProfile)}/analyze`,
         { method: "POST" },
       );
-      setActive(accepted.analysis_id); setLookup(accepted.analysis_id);
-      setRefresh(value => value + 1);
-      setResult(await readJson<Result>(`${base}/${accepted.analysis_id}`));
+      openReport(accepted.analysis_id);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Profile analysis could not be started."); }
     finally { setProfileAnalysisBusy(false); }
   }
 
+  if (reportOnly) return <div className="space-y-6">
+    <Link className="inline-block text-sm underline" href="/evidence">← All evidence reports</Link>
+    {error && <p role="alert" className="panel p-4 text-red-400">{error}</p>}
+    {result ? <ReportResult result={result} /> : <section className="panel p-6 text-sm text-ink-muted">Loading report…</section>}
+  </div>;
+
   return <div className="space-y-6">
+    <section className="panel space-y-4 p-6" aria-live="polite">
+      <div><h2 className="text-lg font-semibold">BlackGlass report pages</h2>
+        <p className="text-sm text-ink-muted">Every accepted evidence request has a permanent page. {reports ? `${reports.total.toLocaleString()} reports stored` : "Loading reports…"}</p></div>
+      {reportsError && <p className="text-sm text-red-400">{reportsError}</p>}
+      {reports?.items.length === 0 && <p className="text-sm text-ink-muted">No reports have been received yet.</p>}
+      <div className="grid gap-3 md:grid-cols-2">{reports?.items.map(report => <Link key={report.analysis_id} href={report.page_url} className="rounded border border-white/10 p-4 transition hover:border-cyan-400/50">
+        <div className="flex items-start justify-between gap-3"><h3 className="font-semibold" dir="auto">{report.subject?.display_label || report.source_id}</h3><span className="rounded-full border border-white/15 px-2 py-1 text-xs">{report.status}</span></div>
+        <p className="mt-2 text-xs text-ink-muted">{report.source_type} · revision {report.revision} · {new Date(report.created_at).toLocaleString()}</p>
+        <p className="mt-1 truncate text-xs text-ink-muted">{report.report_request_id || report.analysis_id}</p>
+      </Link>)}</div>
+    </section>
     {canText && <section className="panel space-y-4 p-6" aria-live="polite">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div><h2 className="text-lg font-semibold">Imported BlackGlass records</h2>
@@ -233,14 +282,19 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
     <section className="panel grid gap-3 p-6">
       <label htmlFor="analysis-id">Open an analysis</label>
       <div className="flex gap-2"><input id="analysis-id" className={`${field} flex-1`} value={lookup} onChange={e => setLookup(e.target.value)} placeholder="Analysis UUID" />
-        <Button onClick={() => { setResult(null); setActive(lookup.trim()); setRefresh(value => value + 1); }}>Open</Button></div>
+        <Button onClick={() => openReport(lookup)}>Open</Button></div>
       <label htmlFor="evidence-query">Search your evidence</label>
       <div className="flex gap-2"><input id="evidence-query" dir="auto" className={`${field} flex-1`} value={query} onChange={e => setQuery(e.target.value)} />
         <Button onClick={() => void search()}>Search</Button></div>
-      {hits.map(hit => <button className="text-left text-sm underline" key={hit.evidence.evidence_id} onClick={() => { setLookup(hit.analysis_id); setActive(hit.analysis_id); }}><span dir="auto">{hit.evidence.original_text.slice(0, 200)}</span></button>)}
+      {hits.map(hit => <button className="text-left text-sm underline" key={hit.evidence.evidence_id} onClick={() => openReport(hit.analysis_id)}><span dir="auto">{hit.evidence.original_text.slice(0, 200)}</span></button>)}
     </section>
     {error && <p role="alert" className="panel p-4 text-red-400">{error}</p>}
-    {result && <section className="panel space-y-5 p-6" aria-live="polite">
+    {result && <ReportResult result={result} />}
+  </div>;
+}
+
+function ReportResult({ result }: { result: Result }) {
+  return <section className="panel space-y-5 p-6" aria-live="polite">
       <h2 className="text-lg font-semibold">{result.source_id} · {result.status} · revision {result.revision}</h2>
       <p className="text-sm text-ink-muted">Findings are unreviewed model output. Citations verify referenced excerpts, not the truth of a conclusion.</p>
       <a className="underline" href={`${base}/${result.analysis_id}/content`}>Download original evidence</a>
@@ -259,8 +313,7 @@ export function EvidenceWorkspace({ canText, canMedia }: { canText: boolean; can
         {piece.translations.map((translation, i) => <div key={i}><span className="text-xs">{translation.task}</span><p dir="auto" className="leading-8">{translation.text}</p></div>)}
         <details className="text-xs"><summary>Processing provenance</summary><pre className="overflow-x-auto">{JSON.stringify(piece.provenance, null, 2)}</pre></details>
       </article>)}
-    </section>}
-  </div>;
+    </section>;
 }
 
 function safeHttpUrl(value: unknown): string | null {

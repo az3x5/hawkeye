@@ -459,6 +459,14 @@ async def test_http_ingestion_authentication_and_ownership(db, settings) -> None
         assert (await client.get(status_path)).json()["runs"] == {}
         assert (await client.get(path)).status_code == 404
         assert (await client.get(path + "/content")).status_code == 404
+        authenticate(app, Scope.MEDIA_READ, Scope.ADMIN, subject="admin")
+        listing = await client.get("/api/v1/integrations/blackglass/evidence")
+        assert listing.status_code == 200
+        assert listing.json()["total"] == 1
+        assert listing.json()["items"][0]["page_url"] == (
+            f"/evidence/{accepted.json()['analysis_id']}"
+        )
+        assert (await client.get(path)).status_code == 200
 
 
 async def test_unified_ingestion_accepts_text_and_files_and_replays(db, settings, tmp_path) -> None:

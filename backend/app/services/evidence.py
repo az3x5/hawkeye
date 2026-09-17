@@ -142,19 +142,13 @@ class EvidenceRepository:
             "results_url": f"/api/v1/integrations/blackglass/evidence/{record['analysis_id']}",
         }
 
-    async def get(self, analysis_id: UUID, owner: str) -> dict[str, Any]:
-        """Read only the caller's run; UUID knowledge never grants access."""
+    async def get(self, analysis_id: UUID, owner: str | None) -> dict[str, Any]:
+        """Read an owned run, or any run after an API-layer admin check."""
+        conditions = [runs.c.analysis_id == analysis_id]
+        if owner is not None:
+            conditions.append(runs.c.owner == owner)
         record = (
-            (
-                await self.session.execute(
-                    select(runs).where(
-                        runs.c.analysis_id == analysis_id,
-                        runs.c.owner == owner,
-                    )
-                )
-            )
-            .mappings()
-            .one_or_none()
+            (await self.session.execute(select(runs).where(*conditions))).mappings().one_or_none()
         )
         if record is None:
             raise EvidenceNotFound("analysis not found")
