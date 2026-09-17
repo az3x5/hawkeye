@@ -251,6 +251,7 @@ async def test_report_analysis_reads_every_extracted_post_chunk(monkeypatch) -> 
     monkeypatch.setattr(processor, "ollama", summary)
     items, result = await processor.process(uuid4(), body, text=body.text)
     assert len(items) > 12
+    assert max(batch_sizes) <= 4
     assert sum(batch_sizes) == len(items)
     assert result["summary_provenance"]["pieces_considered"] == str(len(items))
 

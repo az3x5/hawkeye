@@ -430,7 +430,7 @@ class EvidenceProcessor:
             successful_batches = 0
             model_name = ""
             model_revision = ""
-            summary_batch_size = 6
+            summary_batch_size = 4
             for offset in range(0, len(items), summary_batch_size):
                 batch = items[offset : offset + summary_batch_size]
                 try:
