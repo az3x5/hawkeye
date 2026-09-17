@@ -425,10 +425,17 @@ class EvidenceProcessor:
             successful_batches = 0
             model_name = ""
             model_revision = ""
-            for offset in range(0, len(items), 12):
-                batch = items[offset : offset + 12]
+            summary_batch_size = 3
+            for offset in range(0, len(items), summary_batch_size):
+                batch = items[offset : offset + summary_batch_size]
                 try:
-                    context = [piece.model_dump(mode="json") for piece in batch]
+                    context = [
+                        {
+                            "evidence_id": str(piece.evidence_id),
+                            "original_text": piece.original_text,
+                        }
+                        for piece in batch
+                    ]
                     result = await self.ollama(
                         self.settings.summary_model,
                         [
@@ -470,7 +477,10 @@ class EvidenceProcessor:
                     model_name = result["model"]
                     model_revision = result["revision"]
                 except Exception:  # noqa: BLE001
-                    warn("summary", f"batch_{offset // 12 + 1}_failed_or_citations_rejected")
+                    warn(
+                        "summary",
+                        f"batch_{offset // summary_batch_size + 1}_failed_or_citations_rejected",
+                    )
 
             def unique(values: list[Any], limit: int) -> list[Any]:
                 selected = []
@@ -499,7 +509,7 @@ class EvidenceProcessor:
                     "model": model_name,
                     "revision": model_revision,
                     "successful_batches": str(successful_batches),
-                    "total_batches": str(math.ceil(len(items) / 12)),
+                    "total_batches": str(math.ceil(len(items) / summary_batch_size)),
                     "pieces_considered": str(len(items)),
                 }
                 if successful_batches
