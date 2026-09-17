@@ -425,7 +425,7 @@ class EvidenceProcessor:
             successful_batches = 0
             model_name = ""
             model_revision = ""
-            summary_batch_size = 3
+            summary_batch_size = 6
             for offset in range(0, len(items), summary_batch_size):
                 batch = items[offset : offset + summary_batch_size]
                 try:
@@ -451,6 +451,8 @@ class EvidenceProcessor:
                                     "activity timeline; repeated behaviour and communication "
                                     "patterns; explicit associations and interactions; observable "
                                     "risk indicators; and suspicious-activity indicators. "
+                                    "Return at most four concise findings and one concise "
+                                    "contradiction for this batch. Omit unsupported dimensions. "
                                     "Identity requires "
                                     "an explicit self-identification, account field, or "
                                     "quoted identifier; never infer it from appearance. "
@@ -468,6 +470,7 @@ class EvidenceProcessor:
                             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                         ],
                         format=findings_output_schema(),
+                        options={"temperature": 0, "num_predict": 768, "num_ctx": 8192},
                     )
                     batch_findings = Findings.model_validate_json(result["text"])
                     validate_citations(batch_findings, batch)
