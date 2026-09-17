@@ -54,14 +54,14 @@ def findings_output_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "evidence_id": {"type": "string"},
-            "quote": {"type": "string", "maxLength": 240},
+            "quote": {"type": "string", "maxLength": 120},
         },
         "required": ["evidence_id", "quote"],
     }
     finding = {
         "type": "object",
         "properties": {
-            "statement": {"type": "string", "maxLength": 320},
+            "statement": {"type": "string", "maxLength": 180},
             "section": {
                 "type": "string",
                 "enum": [
@@ -116,7 +116,7 @@ def findings_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "findings": {"type": "array", "items": finding, "maxItems": 4},
+            "findings": {"type": "array", "items": finding, "maxItems": 2},
             "contradictions": {"type": "array", "items": finding, "maxItems": 1},
         },
         "required": ["findings", "contradictions"],
@@ -456,7 +456,7 @@ class EvidenceProcessor:
                                     "activity timeline; repeated behaviour and communication "
                                     "patterns; explicit associations and interactions; observable "
                                     "risk indicators; and suspicious-activity indicators. "
-                                    "Return at most four concise findings and one concise "
+                                    "Return at most two concise findings and one concise "
                                     "contradiction for this batch. Omit unsupported dimensions. "
                                     "Identity requires "
                                     "an explicit self-identification, account field, or "
@@ -475,7 +475,7 @@ class EvidenceProcessor:
                             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                         ],
                         format=findings_output_schema(),
-                        options={"temperature": 0, "num_predict": 768, "num_ctx": 8192},
+                        options={"temperature": 0, "num_predict": 384, "num_ctx": 8192},
                     )
                     batch_findings = Findings.model_validate_json(result["text"])
                     validate_citations(batch_findings, batch)
