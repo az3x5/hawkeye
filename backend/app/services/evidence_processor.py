@@ -54,14 +54,14 @@ def findings_output_schema() -> dict[str, Any]:
         "type": "object",
         "properties": {
             "evidence_id": {"type": "string"},
-            "quote": {"type": "string"},
+            "quote": {"type": "string", "maxLength": 240},
         },
         "required": ["evidence_id", "quote"],
     }
     finding = {
         "type": "object",
         "properties": {
-            "statement": {"type": "string"},
+            "statement": {"type": "string", "maxLength": 320},
             "section": {
                 "type": "string",
                 "enum": [
@@ -96,7 +96,12 @@ def findings_output_schema() -> dict[str, Any]:
                     "risk_indicator",
                 ],
             },
-            "citations": {"type": "array", "items": citation},
+            "citations": {
+                "type": "array",
+                "items": citation,
+                "minItems": 1,
+                "maxItems": 1,
+            },
             "review_status": {"type": "string", "enum": ["unreviewed"]},
         },
         "required": [
@@ -111,8 +116,8 @@ def findings_output_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "findings": {"type": "array", "items": finding},
-            "contradictions": {"type": "array", "items": finding},
+            "findings": {"type": "array", "items": finding, "maxItems": 4},
+            "contradictions": {"type": "array", "items": finding, "maxItems": 1},
         },
         "required": ["findings", "contradictions"],
     }
