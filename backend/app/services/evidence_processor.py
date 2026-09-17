@@ -475,7 +475,7 @@ class EvidenceProcessor:
                             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                         ],
                         format=findings_output_schema(),
-                        options={"temperature": 0, "num_predict": 384, "num_ctx": 8192},
+                        options={"temperature": 0, "num_predict": 256, "num_ctx": 8192},
                     )
                     batch_findings = Findings.model_validate_json(result["text"])
                     validate_citations(batch_findings, batch)
