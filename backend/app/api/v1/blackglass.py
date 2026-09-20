@@ -19,11 +19,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from app.api.v1.dependencies import (
+    BlackGlassMediaPipeline,
+    BlackGlassTextPipeline,
     _postgres,
+    get_blackglass_media_pipeline,
     get_blackglass_s3_source,
+    get_blackglass_text_pipeline,
     get_enrolment_service,
-    get_language_document_service,
-    get_media_service,
     get_read_queries,
 )
 from app.api.v1.enrolments import MAX_IMAGE_BYTES
@@ -47,14 +49,14 @@ from app.domain.content_types import (
     sniff,
     verify_declared,
 )
-from app.domain.evidence import AnalysisOptions, ReportSubject, TextSubmission
+from app.domain.evidence import AnalysisOptions, ReportSubject, Submission, TextSubmission
 from app.domain.jobs import ProcessingState
 from app.domain.media import Classification, MediaError, SourceType
 from app.domain.models import DomainValidationError
 from app.services.enrolment import EnrolmentError, EnrolmentRequest, EnrolmentService
 from app.services.evidence import EvidenceRepository, content_hash
-from app.services.language_search import DocumentSubmission, LanguageDocumentService
-from app.services.media import IngestRequest, MediaService
+from app.services.language_search import DocumentSubmission
+from app.services.media import IngestRequest
 
 router = APIRouter(prefix="/integrations/blackglass", tags=["integrations", "blackglass"])
 
@@ -155,6 +157,9 @@ class BlackGlassIngestionResponse(BaseModel):
     media: MediaAssetResponse | None = None
     media_source: AssetSourceResponse | None = None
     processing_state: ProcessingState | None = None
+    analysis_id: UUID | None = None
+    results_url: str | None = None
+    report_page_url: str | None = None
 
 
 class BlackGlassDocumentSummary(BaseModel):
@@ -298,6 +303,84 @@ def _default_analyses(content_type: str) -> list[AnalysisCapability]:
     if content_type == "application/pdf":
         return [AnalysisCapability.OCR]
     return []
+
+
+def _bounded_attribute(attributes: dict[str, Any], name: str, maximum: int = 256) -> str | None:
+    """Return a usable legacy correlation value without trusting arbitrary objects."""
+    value = attributes.get(name)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if 0 < len(value) <= maximum else None
+
+
+def _legacy_report_submission(
+    *,
+    source_id: str,
+    source_type: str,
+    attributes: dict[str, Any],
+    requested: list[AnalysisCapability],
+    title: str | None = None,
+    text: str | None = None,
+    language_hint: str | None = None,
+) -> TextSubmission | Submission:
+    """Adapt the stable legacy contract to one durable report run per source record."""
+    profile_id = _bounded_attribute(attributes, "profile_id")
+    person_id = _bounded_attribute(attributes, "person_id")
+    vehicle_id = _bounded_attribute(attributes, "vehicle_id")
+    subject_type: Literal["social_profile", "person", "vehicle", "case", "other"]
+    if profile_id:
+        subject_type = "social_profile"
+        subject_id = profile_id
+    elif person_id:
+        subject_type = "person"
+        subject_id = person_id
+    elif vehicle_id:
+        subject_type = "vehicle"
+        subject_id = vehicle_id
+    else:
+        subject_type = "other"
+        subject_id = source_id
+
+    normalized_hint = (language_hint or "").lower()
+    language: Literal["dv", "en", "mixed", "unknown"] = "unknown"
+    if normalized_hint.startswith("dv"):
+        language = "dv"
+    elif normalized_hint.startswith("en"):
+        language = "en"
+    elif normalized_hint == "mixed":
+        language = "mixed"
+    options = AnalysisOptions(
+        language=language,
+        translate_to=(
+            "en" if AnalysisCapability.TRANSLATION in requested and language == "dv" else None
+        ),
+        transliterate=(
+            "latin"
+            if AnalysisCapability.TRANSLITERATION in requested and language == "dv"
+            else None
+        ),
+    )
+    submission: dict[str, Any] = {
+        "schema_version": "1.1",
+        "source_id": source_id,
+        "source_type": source_type,
+        "attributes": {
+            **attributes,
+            **({"title": title} if title else {}),
+            "requested_analyses": [item.value for item in requested],
+        },
+        "options": options,
+        "report_request_id": _bounded_attribute(attributes, "report_request_id") or source_id,
+        "subject": ReportSubject(
+            subject_type=subject_type,
+            subject_id=subject_id,
+            display_label=title or _bounded_attribute(attributes, "display_label", 512),
+        ),
+    }
+    if text is not None:
+        return TextSubmission.model_validate({**submission, "text": text})
+    return Submission.model_validate(submission)
 
 
 def _route(capability: AnalysisCapability, content_type: str) -> AnalysisRoute:
@@ -578,7 +661,7 @@ async def import_blackglass_aws_faces(
 )
 async def ingest_blackglass_media(
     file: Annotated[UploadFile, File()],
-    service: Annotated[MediaService, Depends(get_media_service)],
+    pipeline: Annotated[BlackGlassMediaPipeline, Depends(get_blackglass_media_pipeline)],
     principal: Annotated[Principal, Depends(require(Scope.MEDIA_WRITE))],
     source_id: Annotated[str | None, Form(min_length=1, max_length=256)] = None,
     source_type: Annotated[str | None, Form(min_length=1, max_length=64)] = None,
@@ -594,6 +677,7 @@ async def ingest_blackglass_media(
     requested_analyses: Annotated[str, Form()] = "",
 ) -> BlackGlassIngestionResponse:
     """Store one BlackGlass binary object and return its processing routes."""
+    service = pipeline.media
     try:
         resolved_id = source_id or external_object_id
         resolved_type = source_type or external_object_type
@@ -639,6 +723,17 @@ async def ingest_blackglass_media(
 
     if not requested:
         requested = _default_analyses(result.asset.mime_type)
+    evidence = await pipeline.evidence.submit(
+        principal.subject,
+        _legacy_report_submission(
+            source_id=resolved_id,
+            source_type=resolved_type,
+            attributes=source_attributes,
+            requested=requested,
+        ),
+        sha256=result.asset.sha256,
+        media_uuid=result.asset.media_uuid,
+    )
     return BlackGlassIngestionResponse(
         source_id=resolved_id,
         source_type=resolved_type,
@@ -650,6 +745,9 @@ async def ingest_blackglass_media(
         analysis_routes=[_route(item, result.asset.mime_type) for item in requested],
         media=MediaAssetResponse.model_validate(result.asset, from_attributes=True),
         media_source=AssetSourceResponse.model_validate(result.source, from_attributes=True),
+        analysis_id=evidence["analysis_id"],
+        results_url=evidence["results_url"],
+        report_page_url=evidence["report_page_url"],
     )
 
 
@@ -661,10 +759,11 @@ async def ingest_blackglass_media(
 )
 async def ingest_blackglass_text(
     body: BlackGlassTextRequest,
-    service: Annotated[LanguageDocumentService, Depends(get_language_document_service)],
-    _principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
+    pipeline: Annotated[BlackGlassTextPipeline, Depends(get_blackglass_text_pipeline)],
+    principal: Annotated[Principal, Depends(require(Scope.LANGUAGE))],
 ) -> BlackGlassIngestionResponse:
     """Persist BlackGlass text and enqueue semantic indexing idempotently."""
+    service = pipeline.language
     attributes = {
         **body.attributes,
         "source_id": body.source_id,
@@ -680,6 +779,20 @@ async def ingest_blackglass_text(
             attributes=attributes,
         )
     )
+    evidence = await pipeline.evidence.submit(
+        principal.subject,
+        _legacy_report_submission(
+            source_id=body.source_id,
+            source_type=body.source_type,
+            attributes=body.attributes,
+            requested=body.requested_analyses,
+            title=body.title,
+            text=body.text,
+            language_hint=body.language_hint,
+        ),
+        sha256=content_hash(body.text.encode()),
+        text=body.text,
+    )
     return BlackGlassIngestionResponse(
         source_id=body.source_id,
         source_type=body.source_type,
@@ -690,6 +803,9 @@ async def ingest_blackglass_text(
         content_type="text/plain; charset=utf-8",
         analysis_routes=[_route(item, "text/plain") for item in body.requested_analyses],
         processing_state=document.processing_state,
+        analysis_id=evidence["analysis_id"],
+        results_url=evidence["results_url"],
+        report_page_url=evidence["report_page_url"],
     )
 
 

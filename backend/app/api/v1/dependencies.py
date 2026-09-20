@@ -8,6 +8,7 @@ nowhere else.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 from fastapi import Request
 
@@ -35,6 +36,7 @@ from app.services.authentication import AuthenticationService
 from app.services.dhivehi_ai_client import DhivehiAIClient
 from app.services.enrolment import EnrolmentService, SampleReader
 from app.services.erasure import PersonEraser
+from app.services.evidence import EvidenceRepository
 from app.services.identification import IdentificationService
 from app.services.language_search import LanguageDocumentService, LanguageSearchService
 from app.services.media import MediaService
@@ -43,6 +45,22 @@ from app.services.processing import (
     LanguageJobSubmitter,
     ProcessingJobAdministration,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class BlackGlassMediaPipeline:
+    """Legacy media storage and evidence admission sharing one transaction."""
+
+    media: MediaService
+    evidence: EvidenceRepository
+
+
+@dataclass(frozen=True, slots=True)
+class BlackGlassTextPipeline:
+    """Legacy text indexing and evidence admission sharing one transaction."""
+
+    language: LanguageDocumentService
+    evidence: EvidenceRepository
 
 
 def _postgres(request: Request) -> PostgresConnector:
@@ -144,6 +162,28 @@ async def get_media_service(request: Request) -> AsyncIterator[MediaService]:
         )
 
 
+async def get_blackglass_media_pipeline(
+    request: Request,
+) -> AsyncIterator[BlackGlassMediaPipeline]:
+    """Build legacy media storage and report admission on one commit boundary."""
+    blobs = getattr(request.app.state, "blobs", None)
+    if blobs is None:
+        raise ServiceUnavailableError("media storage is not available")
+
+    settings: Settings = request.app.state.settings
+    async with _postgres(request).session() as session:
+        yield BlackGlassMediaPipeline(
+            media=MediaService(
+                repository=SqlAlchemyMediaRepository(session),
+                blobs=blobs,
+                audit=SqlAlchemyAuditLog(session),
+                max_bytes=settings.media_max_upload_bytes,
+                page_size_limit=settings.media_page_size_limit,
+            ),
+            evidence=EvidenceRepository(session),
+        )
+
+
 def get_object_store(request: Request) -> FilesystemObjectStore:
     """Return the object store holding source images."""
     objects = getattr(request.app.state, "objects", None)
@@ -231,6 +271,24 @@ async def get_language_document_service(
                 SqlAlchemyProcessingJobRepository(session),
                 max_attempts=settings.job_max_attempts,
             ),
+        )
+
+
+async def get_blackglass_text_pipeline(
+    request: Request,
+) -> AsyncIterator[BlackGlassTextPipeline]:
+    """Build legacy text indexing and report admission on one commit boundary."""
+    async with _postgres(request).session() as session:
+        settings: Settings = request.app.state.settings
+        yield BlackGlassTextPipeline(
+            language=LanguageDocumentService(
+                SqlAlchemyLanguageDocumentRepository(session),
+                LanguageJobSubmitter(
+                    SqlAlchemyProcessingJobRepository(session),
+                    max_attempts=settings.job_max_attempts,
+                ),
+            ),
+            evidence=EvidenceRepository(session),
         )
 
 

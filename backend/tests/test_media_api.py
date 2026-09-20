@@ -11,8 +11,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
-from uuid import uuid4
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 import httpx2
 import pytest
@@ -21,7 +21,11 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.blackglass import router as blackglass_router
 from app.api.v1.dependencies import (
+    BlackGlassMediaPipeline,
+    BlackGlassTextPipeline,
+    get_blackglass_media_pipeline,
     get_blackglass_s3_source,
+    get_blackglass_text_pipeline,
     get_enrolment_service,
     get_language_document_service,
     get_media_service,
@@ -67,6 +71,35 @@ class RecordingLanguageService:
             ),
             True,
         )
+
+
+class RecordingEvidenceRepository:
+    """Contract fake proving legacy deliveries also create stable report runs."""
+
+    def __init__(self) -> None:
+        self.ids: dict[tuple[str, str, str], UUID] = {}
+        self.submissions: list[Any] = []
+
+    async def submit(
+        self,
+        owner: str,
+        submission: Any,
+        *,
+        sha256: str,
+        text: str | None = None,
+        media_uuid: UUID | None = None,
+        source_object: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        del text, media_uuid, source_object
+        key = (owner, submission.source_type, submission.source_id)
+        analysis_id = self.ids.setdefault(key, uuid4())
+        self.submissions.append(submission)
+        return {
+            "analysis_id": analysis_id,
+            "results_url": f"/api/v1/integrations/blackglass/evidence/{analysis_id}",
+            "report_page_url": f"/evidence/{analysis_id}",
+            "sha256": sha256,
+        }
 
 
 class RecordingBlackGlassSource:
@@ -151,12 +184,23 @@ def build_client(
 
     app.dependency_overrides[get_media_service] = _service
     language_service = RecordingLanguageService()
+    evidence_repository = RecordingEvidenceRepository()
     app.state.language_service = language_service
+    app.state.evidence_repository = evidence_repository
 
     async def _language_service() -> RecordingLanguageService:
         return language_service
 
     app.dependency_overrides[get_language_document_service] = _language_service
+
+    async def _media_pipeline() -> BlackGlassMediaPipeline:
+        return BlackGlassMediaPipeline(service, evidence_repository)  # type: ignore[arg-type]
+
+    async def _text_pipeline() -> BlackGlassTextPipeline:
+        return BlackGlassTextPipeline(language_service, evidence_repository)  # type: ignore[arg-type]
+
+    app.dependency_overrides[get_blackglass_media_pipeline] = _media_pipeline
+    app.dependency_overrides[get_blackglass_text_pipeline] = _text_pipeline
     blackglass_source = RecordingBlackGlassSource()
     enrolment_service = RecordingEnrolmentService()
 
@@ -290,6 +334,8 @@ class TestBlackGlassMediaContract:
         assert body["attributes"]["source_system"] == "blackglass-prod"
         assert body["media_source"]["source_type"] == "blackglass"
         assert body["subject"]["type"] == "media"
+        assert body["analysis_id"]
+        assert body["report_page_url"] == f"/evidence/{body['analysis_id']}"
         assert body["analysis_routes"] == [
             {
                 "capability": "face_identification",
@@ -372,11 +418,21 @@ class TestBlackGlassMediaContract:
         assert body["source_type"] == "post"
         assert "source" not in body
         assert body["subject"]["type"] == "language_document"
+        assert body["analysis_id"]
+        assert body["report_page_url"] == f"/evidence/{body['analysis_id']}"
         assert body["analysis_routes"][0]["state"] == "queued"
         request = cast("FastAPI", client.app).state.language_service.request
         assert request is not None
         assert request.attributes["source_id"] == "post-91"
         assert request.attributes["source_type"] == "post"
+        evidence = cast(
+            "RecordingEvidenceRepository",
+            cast("FastAPI", client.app).state.evidence_repository,
+        )
+        submission = evidence.submissions[-1]
+        assert submission.source_id == "post-91"
+        assert submission.subject.subject_type == "other"
+        assert submission.subject.subject_id == "post-91"
 
     def test_aws_status_exposes_no_credentials(self, client: TestClient) -> None:
         response = client.get("/api/v1/integrations/blackglass/aws/status")
