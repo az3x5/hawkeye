@@ -15,6 +15,12 @@ type Finding = { statement: string; section: string; citations: Array<{ evidence
 type Result = {
   analysis_id: string; status: string; revision: number; storage_mode: string;
   source_id: string; source_type: string; attributes: Record<string, unknown>; source_sha256: string;
+  created_at: string; updated_at: string;
+  processing?: {
+    status: string; attempt_count: number; max_attempts: number; queued_at: string;
+    started_at: string | null; completed_at: string | null; available_at: string;
+    worker_id: string | null; error_code: string | null; error_detail: string | null;
+  } | null;
   evidence: Piece[]; findings?: Finding[]; contradictions?: Finding[];
   warnings?: Array<{ stage: string; code: string }>;
 };
@@ -294,25 +300,59 @@ export function EvidenceWorkspace({ canText, canMedia, initialAnalysisId = "", r
 }
 
 function ReportResult({ result }: { result: Result }) {
+  const findings = [...(result.findings ?? []), ...(result.contradictions ?? [])];
+  const processing = result.processing;
+  const isActive = ["queued", "running", "retry"].includes(processing?.status ?? result.status);
+  const stateLabel = isActive
+    ? processing?.status === "running" ? "Analysis is running" : processing?.status === "retry" ? "Analysis will retry" : "Analysis is queued"
+    : result.status === "partial" ? "Analysis finished with gaps" : result.status === "completed" ? "Analysis finished" : "Analysis stopped";
+  const stateDetail = isActive
+    ? processing?.status === "running" ? "A worker is extracting evidence and generating cited findings. This page refreshes automatically." : "Waiting for an analysis worker. This page refreshes automatically."
+    : result.status === "partial" ? `${findings.length} cited findings were retained; ${result.warnings?.length ?? 0} batches were rejected or could not be validated.` : `${findings.length} cited findings were retained from ${result.evidence.length} evidence sections.`;
+
   return <section className="panel space-y-5 p-6" aria-live="polite">
-      <h2 className="text-lg font-semibold">{result.source_id} · {result.status} · revision {result.revision}</h2>
+      <div className="rounded border border-white/10 bg-black/10 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Processing status</p>
+            <h2 className="mt-1 text-lg font-semibold">{stateLabel}</h2>
+          </div>
+          <span className={`rounded-full border px-3 py-1 text-xs font-medium ${result.status === "partial" ? "border-amber-400/40 text-amber-300" : isActive ? "border-cyan-400/40 text-cyan-300" : "border-emerald-400/40 text-emerald-300"}`}>{processing?.status ?? result.status}</span>
+        </div>
+        <p className="mt-2 text-sm text-ink-muted">{stateDetail}</p>
+        <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          <div><dt className="text-ink-faint">Source</dt><dd className="mt-1 break-all text-ink">{result.source_id}</dd></div>
+          <div><dt className="text-ink-faint">Evidence sections</dt><dd className="mt-1 text-ink">{result.evidence.length.toLocaleString()}</dd></div>
+          <div><dt className="text-ink-faint">Worker attempts</dt><dd className="mt-1 text-ink">{processing ? `${processing.attempt_count} of ${processing.max_attempts}` : "Not reported"}</dd></div>
+          <div><dt className="text-ink-faint">Last update</dt><dd className="mt-1 text-ink">{new Date(result.updated_at).toLocaleString()}</dd></div>
+        </dl>
+        {processing?.error_code && <p className="mt-3 text-sm text-red-400">Worker error: {processing.error_code.replaceAll("_", " ")}{processing.error_detail ? ` — ${processing.error_detail}` : ""}</p>}
+      </div>
       <p className="text-sm text-ink-muted">Findings are unreviewed model output. Citations verify referenced excerpts, not the truth of a conclusion.</p>
       <a className="underline" href={`${base}/${result.analysis_id}/content`}>Download original evidence</a>
       <a className="ml-4 underline" href={`${base}/${result.analysis_id}/report`} download>Download BlackGlass report JSON</a>
       <p className="break-all text-xs">SHA-256: {result.source_sha256} · {result.storage_mode}</p>
-      {result.warnings?.map((warning, i) => <p key={i} className="text-sm text-amber-400">{warning.stage}: {warning.code.replaceAll("_", " ")}</p>)}
-      {[...(result.findings ?? []), ...(result.contradictions ?? [])].map((finding, i) => <article key={i} className="border-l-2 border-cyan-500 pl-4">
+      {(result.warnings?.length ?? 0) > 0 && <details className="rounded border border-amber-400/20 bg-amber-400/5 p-4">
+        <summary className="cursor-pointer text-sm font-medium text-amber-300">{result.warnings?.length} processing warnings — show details</summary>
+        <div className="mt-3 space-y-2">{result.warnings?.map((warning, i) => <p key={i} className="text-sm text-amber-300">{warning.stage}: {warning.code.replaceAll("_", " ")}</p>)}</div>
+      </details>}
+      <div className="border-b border-white/10 pb-2"><h3 className="text-base font-semibold">Cited analysis</h3><p className="text-sm text-ink-muted">Only claims that passed citation checks appear below.</p></div>
+      {findings.length === 0 && !isActive && <p className="rounded border border-amber-400/20 p-4 text-sm text-amber-300">No model findings passed citation validation. The original evidence is preserved below.</p>}
+      {findings.map((finding, i) => <article key={i} className="border-l-2 border-cyan-500 pl-4">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-cyan-300">{finding.section.replace(/^osp-/, "").replaceAll("-", " ")}</p>
         <p dir="auto">{finding.statement}</p>
         {finding.citations.map((citation, j) => <a className="block text-sm underline" key={j} href={`#evidence-${citation.evidence_id}`}><span dir="auto">“{citation.quote}”</span></a>)}
       </article>)}
-      {result.evidence.map(piece => <article id={`evidence-${piece.evidence_id}`} key={piece.evidence_id} className="scroll-mt-24 space-y-2 border-t border-white/10 pt-4">
+      <details className="border-t border-white/10 pt-4">
+        <summary className="cursor-pointer text-base font-semibold">Source evidence ({result.evidence.length.toLocaleString()} sections)</summary>
+        <div className="mt-4 space-y-5">{result.evidence.map(piece => <article id={`evidence-${piece.evidence_id}`} key={piece.evidence_id} className="scroll-mt-24 space-y-2 border-t border-white/10 pt-4">
         <h3 className="font-medium">{piece.kind.replaceAll("_", " ")}</h3>
         <p className="text-xs text-ink-muted">{piece.locator.page != null && `Page ${piece.locator.page} · `}{piece.locator.start_ms != null && `${piece.locator.start_ms / 1000}–${(piece.locator.end_ms ?? 0) / 1000}s · `}{piece.locator.precision.replaceAll("_", " ")}</p>
         <p dir="auto" className="whitespace-pre-wrap leading-8">{piece.original_text}</p>
         {piece.translations.map((translation, i) => <div key={i}><span className="text-xs">{translation.task}</span><p dir="auto" className="leading-8">{translation.text}</p></div>)}
         <details className="text-xs"><summary>Processing provenance</summary><pre className="overflow-x-auto">{JSON.stringify(piece.provenance, null, 2)}</pre></details>
-      </article>)}
+        </article>)}</div>
+      </details>
     </section>;
 }
 

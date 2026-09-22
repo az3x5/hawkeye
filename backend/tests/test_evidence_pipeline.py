@@ -44,6 +44,7 @@ from app.services.evidence_processor import (
     EvidenceProcessor,
     EvidenceSettings,
     findings_output_schema,
+    reanchor_whitespace_citations,
     validated_findings_subset,
 )
 from app.services.evidence_report import SECTIONS, build_blackglass_report
@@ -145,6 +146,57 @@ def test_validated_findings_subset_discards_only_bad_claim() -> None:
     assert accepted.findings == [good]
     assert accepted.contradictions == []
     assert rejected == 1
+
+
+def test_model_collapsed_whitespace_is_reanchored_to_exact_source() -> None:
+    run_id = uuid4()
+    body = submission()
+    body.text = "First line.\n\nSecond line has support."
+    piece = __import__("asyncio").run(
+        EvidenceProcessor(None, EvidenceSettings()).process(run_id, body, text=body.text)
+    )[0][0]
+    candidate = Findings(
+        findings=[
+            Finding(
+                statement="The source contains two lines.",
+                citations=[
+                    Citation(
+                        evidence_id=piece.evidence_id,
+                        quote="First line. Second line has support.",
+                    )
+                ],
+            )
+        ]
+    )
+
+    repaired = reanchor_whitespace_citations(candidate, [piece])
+
+    assert repaired.findings[0].citations[0].quote == body.text
+    validate_citations(repaired, [piece])
+    assert candidate.findings[0].citations[0].quote != body.text
+
+
+def test_reanchor_does_not_accept_changed_words() -> None:
+    run_id = uuid4()
+    body = submission()
+    piece = __import__("asyncio").run(
+        EvidenceProcessor(None, EvidenceSettings()).process(run_id, body, text=body.text)
+    )[0][0]
+    candidate = Findings(
+        findings=[
+            Finding(
+                statement="Unsupported time.",
+                citations=[
+                    Citation(evidence_id=piece.evidence_id, quote="meeting is at ten")
+                ],
+            )
+        ]
+    )
+
+    repaired = reanchor_whitespace_citations(candidate, [piece])
+
+    with pytest.raises(ValueError, match="verbatim"):
+        validate_citations(repaired, [piece])
 
 
 def test_record_and_owner_are_part_of_idempotency() -> None:

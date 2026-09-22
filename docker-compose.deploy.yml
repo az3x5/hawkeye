@@ -19,7 +19,7 @@
 # take all of it and stall everything else, including the health checks that
 # would tell you it happened. The ceilings deliberately overlap — they cap a
 # single service, they are not a partition of the machine — but the memory
-# ceilings sum to roughly 23 GB, leaving the host its own headroom.
+# ceilings sum to roughly 25 GB, leaving the host its own headroom.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.deploy.yml up -d
 services:
@@ -61,7 +61,10 @@ services:
   ollama:
     deploy:
       resources:
-        limits: {cpus: "4.0", memory: 6g}
+        # Qwen plus CUDA host buffers can approach 8 GiB during long cited reports. Keep enough
+        # headroom to avoid false "full" alarms and allocator failures while
+        # retaining one loaded model and one inference at a time.
+        limits: {cpus: "4.0", memory: 10g}
     restart: unless-stopped
 
   postgres:

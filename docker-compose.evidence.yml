@@ -2,6 +2,7 @@
 services:
   evidence-worker: &evidence-worker
     profiles: [evidence]
+    scale: ${EVIDENCE_WORKER_REPLICAS:-1}
     build:
       context: ./backend
       dockerfile: Dockerfile.evidence
@@ -41,6 +42,7 @@ services:
   evidence-delivery:
     <<: *evidence-worker
     profiles: [evidence-delivery]
+    scale: 1
     command: [python, -m, app.evidence_worker, --delivery]
     environment:
       <<: *evidence-environment

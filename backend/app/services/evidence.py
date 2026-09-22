@@ -23,7 +23,7 @@ from app.domain.evidence import (
     Submission,
     submission_key,
 )
-from app.domain.processing import ProcessingJob
+from app.domain.processing import JobPriority, ProcessingJob
 
 
 def _source_fields(submission: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
@@ -71,6 +71,7 @@ class EvidenceRepository:
         text: str | None = None,
         media_uuid: UUID | None = None,
         source_object: dict[str, Any] | None = None,
+        priority: JobPriority = JobPriority.NORMAL,
     ) -> dict[str, Any]:
         """Atomically persist correlation and durable work, without inline inference."""
         key = submission_key(owner, submission, sha256)
@@ -127,6 +128,7 @@ class EvidenceRepository:
                     subject_uuid=record["analysis_id"],
                     idempotency_key=key,
                     payload={"analysis_id": str(record["analysis_id"])},
+                    priority=priority,
                 )
             )
         return {
@@ -153,6 +155,22 @@ class EvidenceRepository:
         )
         if record is None:
             raise EvidenceNotFound("analysis not found")
+        job = (
+            (
+                await self.session.execute(
+                    select(processing_jobs)
+                    .where(
+                        processing_jobs.c.pipeline == PIPELINE,
+                        processing_jobs.c.subject_type == "evidence_analysis",
+                        processing_jobs.c.subject_uuid == analysis_id,
+                    )
+                    .order_by(processing_jobs.c.queued_at.desc())
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
         source_id, source_type, attributes = _source_fields(record["submission"])
         items = (
             (
@@ -188,6 +206,22 @@ class EvidenceRepository:
             "revision": record["revision"],
             "created_at": record["created_at"],
             "updated_at": record["updated_at"],
+            "processing": (
+                {
+                    "status": job["status"],
+                    "attempt_count": job["attempt_count"],
+                    "max_attempts": job["max_attempts"],
+                    "queued_at": job["queued_at"],
+                    "started_at": job["started_at"],
+                    "completed_at": job["completed_at"],
+                    "available_at": job["available_at"],
+                    "worker_id": job["worker_id"],
+                    "error_code": job["error_code"],
+                    "error_detail": job["error_detail"],
+                }
+                if job is not None
+                else None
+            ),
             "evidence": list(items),
             **record["result"],
         }

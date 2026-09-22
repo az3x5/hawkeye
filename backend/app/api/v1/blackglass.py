@@ -53,6 +53,7 @@ from app.domain.evidence import AnalysisOptions, ReportSubject, Submission, Text
 from app.domain.jobs import ProcessingState
 from app.domain.media import Classification, MediaError, SourceType
 from app.domain.models import DomainValidationError
+from app.domain.processing import JobPriority
 from app.services.enrolment import EnrolmentError, EnrolmentRequest, EnrolmentService
 from app.services.evidence import EvidenceRepository, content_hash
 from app.services.language_search import DocumentSubmission
@@ -881,16 +882,10 @@ async def analyze_blackglass_profile(
 
         blocks = []
         for row in rows:
-            blocks.append(
-                "\n".join(
-                    [
-                        f"[SOURCE {row['source_id']}]",
-                        row["original_text"],
-                        "[/SOURCE]",
-                    ]
-                )
-            )
-        corpus = "\n\n".join(blocks)
+            # Retain every post and its stable BlackGlass source ID without
+            # verbose wrapper tags that can push a bounded profile over 100k.
+            blocks.append(f"[{row['source_id']}] {row['original_text']}")
+        corpus = "\n".join(blocks)
         if len(corpus) > 100_000:
             raise BlackGlassProfileTooLargeError(
                 "profile text exceeds 100,000 characters; submit bounded report batches"
@@ -910,7 +905,7 @@ async def analyze_blackglass_profile(
                 "source_system": "blackglass-prod",
                 "profile_id": profile_id,
                 "record_count": len(rows),
-                "report_profile": "full-intelligence-v6",
+                "report_profile": "full-intelligence-v8",
             },
             options=AnalysisOptions(language="mixed", summarize=True),
             text=corpus,
@@ -920,4 +915,5 @@ async def analyze_blackglass_profile(
             submission,
             sha256=content_hash(corpus.encode()),
             text=corpus,
+            priority=JobPriority.HIGH,
         )

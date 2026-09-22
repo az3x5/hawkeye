@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,31 @@ def validated_findings_subset(
         ),
         rejected,
     )
+
+
+def reanchor_whitespace_citations(
+    candidate: Findings, evidence: list[EvidencePiece]
+) -> Findings:
+    """Restore source whitespace when a model collapses it inside a verbatim quote.
+
+    JSON-generating models commonly replace line breaks with spaces.  Only that
+    reversible whitespace change is repaired here; altered words, punctuation,
+    evidence IDs, and cross-run references remain invalid.
+    """
+    originals = {piece.evidence_id: piece.original_text for piece in evidence}
+    repaired = candidate.model_copy(deep=True)
+    for finding in repaired.findings + repaired.contradictions:
+        for citation in finding.citations:
+            original = originals.get(citation.evidence_id)
+            if original is None or citation.quote in original:
+                continue
+            tokens = citation.quote.split()
+            if not tokens:
+                continue
+            match = re.search(r"\s+".join(re.escape(token) for token in tokens), original)
+            if match is not None and normalize(match.group(0)) == normalize(citation.quote):
+                citation.quote = match.group(0)
+    return repaired
 
 
 async def media_command(*args: str) -> bytes:
@@ -484,8 +510,10 @@ class EvidenceProcessor:
                                     "activity timeline; repeated behaviour and communication "
                                     "patterns; explicit associations and interactions; observable "
                                     "risk indicators; and suspicious-activity indicators. "
-                                    "Return at most one concise finding and one concise "
-                                    "contradiction for this batch. Omit unsupported dimensions. "
+                                    "Return at most one total item for this batch: either one "
+                                    "concise finding or one concise contradiction, never both. "
+                                    "Use an empty array for the unused category and omit unsupported "
+                                    "dimensions. "
                                     "Identity requires "
                                     "an explicit self-identification, account field, or "
                                     "quoted identifier; never infer it from appearance. "
@@ -503,9 +531,11 @@ class EvidenceProcessor:
                             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                         ],
                         format=findings_output_schema(),
-                        options={"temperature": 0, "num_predict": 256, "num_ctx": 8192},
+                        options={"temperature": 0, "num_predict": 512, "num_ctx": 8192},
                     )
-                    candidate = Findings.model_validate_json(result["text"])
+                    candidate = reanchor_whitespace_citations(
+                        Findings.model_validate_json(result["text"]), batch
+                    )
                     batch_findings, rejected = validated_findings_subset(candidate, batch)
                     if rejected:
                         warn(
