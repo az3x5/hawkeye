@@ -301,6 +301,11 @@ export function EvidenceWorkspace({ canText, canMedia, initialAnalysisId = "", r
 
 function ReportResult({ result }: { result: Result }) {
   const findings = [...(result.findings ?? []), ...(result.contradictions ?? [])];
+  const findingsBySection = findings.reduce<Record<string, Finding[]>>((groups, finding) => {
+    (groups[finding.section] ??= []).push(finding);
+    return groups;
+  }, {});
+  const executiveFindings = findings.slice(0, 5);
   const processing = result.processing;
   const isActive = ["queued", "running", "retry"].includes(processing?.status ?? result.status);
   const stateLabel = isActive
@@ -336,13 +341,29 @@ function ReportResult({ result }: { result: Result }) {
         <summary className="cursor-pointer text-sm font-medium text-amber-300">{result.warnings?.length} processing warnings — show details</summary>
         <div className="mt-3 space-y-2">{result.warnings?.map((warning, i) => <p key={i} className="text-sm text-amber-300">{warning.stage}: {warning.code.replaceAll("_", " ")}</p>)}</div>
       </details>}
-      <div className="border-b border-white/10 pb-2"><h3 className="text-base font-semibold">Cited analysis</h3><p className="text-sm text-ink-muted">Only claims that passed citation checks appear below.</p></div>
+      <section className="rounded border border-cyan-400/20 bg-cyan-400/5 p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Executive summary</p>
+        <h3 className="mt-1 text-lg font-semibold">Evidence-backed analytical overview</h3>
+        <p className="mt-2 text-sm text-ink-muted">
+          This report retained {findings.length.toLocaleString()} citation-validated analytical {findings.length === 1 ? "finding" : "findings"} from {result.evidence.length.toLocaleString()} evidence sections.
+          {result.status === "partial" ? ` ${result.warnings?.length ?? 0} processing batches did not produce valid cited output, so this summary is incomplete.` : " All displayed conclusions remain unreviewed."}
+        </p>
+        {executiveFindings.length > 0 ? <ol className="mt-4 space-y-3">
+          {executiveFindings.map((finding, index) => <li key={`${finding.section}-${index}`} className="flex gap-3 text-sm">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-cyan-400/30 text-xs text-cyan-300">{index + 1}</span>
+            <span dir="auto">{finding.statement}</span>
+          </li>)}
+        </ol> : !isActive && <p className="mt-4 text-sm text-amber-300">No conclusion passed citation validation; only the retained source evidence can be reviewed.</p>}
+      </section>
+      <div className="border-b border-white/10 pb-2"><h3 className="text-base font-semibold">Analysis by section</h3><p className="text-sm text-ink-muted">Only claims that passed citation checks appear below. Missing sections do not imply a negative finding.</p></div>
       {findings.length === 0 && !isActive && <p className="rounded border border-amber-400/20 p-4 text-sm text-amber-300">No model findings passed citation validation. The original evidence is preserved below.</p>}
-      {findings.map((finding, i) => <article key={i} className="border-l-2 border-cyan-500 pl-4">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-cyan-300">{finding.section.replace(/^osp-/, "").replaceAll("-", " ")}</p>
-        <p dir="auto">{finding.statement}</p>
-        {finding.citations.map((citation, j) => <a className="block text-sm underline" key={j} href={`#evidence-${citation.evidence_id}`}><span dir="auto">“{citation.quote}”</span></a>)}
-      </article>)}
+      {Object.entries(findingsBySection).map(([section, sectionFindings]) => <section key={section} className="rounded border border-white/10 p-4">
+        <h4 className="mb-4 text-sm font-semibold uppercase tracking-wide text-cyan-300">{section.replace(/^osp-/, "").replaceAll("-", " ")}</h4>
+        <div className="space-y-4">{sectionFindings.map((finding, i) => <article key={i} className="border-l-2 border-cyan-500 pl-4">
+          <p dir="auto">{finding.statement}</p>
+          <div className="mt-2 space-y-1">{finding.citations.map((citation, j) => <a className="block text-sm underline" key={j} href={`#evidence-${citation.evidence_id}`}><span dir="auto">“{citation.quote}”</span></a>)}</div>
+        </article>)}</div>
+      </section>)}
       <details className="border-t border-white/10 pt-4">
         <summary className="cursor-pointer text-base font-semibold">Source evidence ({result.evidence.length.toLocaleString()} sections)</summary>
         <div className="mt-4 space-y-5">{result.evidence.map(piece => <article id={`evidence-${piece.evidence_id}`} key={piece.evidence_id} className="scroll-mt-24 space-y-2 border-t border-white/10 pt-4">

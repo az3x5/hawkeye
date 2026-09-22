@@ -275,6 +275,16 @@ def test_blackglass_report_preserves_citations_and_marks_gaps() -> None:
     assert data["document"]["schema"] == 2
     assert len(data["blocks"]) == len(SECTIONS) == 31
     assert data["document"]["evidenceRefs"][0]["evidenceId"] == str(evidence_id)
+    executive_summary = next(
+        block for block in data["blocks"] if block["type"] == "osp-profile-summary"
+    )
+    assert executive_summary["heading"]["en"] == "Executive Summary"
+    assert "1 citation-validated finding" in executive_summary["body"]["en"]
+    assert executive_summary["rows"][0][0]["en"] == "Cited finding"
+    key_findings_summary = next(
+        block for block in data["blocks"] if block["type"] == "osp-key-findings"
+    )
+    assert key_findings_summary["rows"][0][0]["en"] == "Cited finding"
     key_findings = next(block for block in data["blocks"] if block["type"] == "osp-associates")
     assert key_findings["rows"][0][0]["en"] == "Cited finding"
     unsupported = next(block for block in data["blocks"] if block["type"] == "osp-triggers")
