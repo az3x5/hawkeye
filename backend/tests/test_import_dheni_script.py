@@ -26,9 +26,11 @@ class Response:
         return self.body if limit is None else self.body[:limit]
 
     def __enter__(self) -> Response:
+        """Return this response from the test context manager."""
         return self
 
     def __exit__(self, *_args: object) -> None:
+        """Close the no-op test context manager."""
         return None
 
 
