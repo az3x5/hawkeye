@@ -47,7 +47,7 @@ jobs:
           docker run --detach --name minio-ci --publish 9000:9000 \
             --env MINIO_ROOT_USER=eagleeye \
             --env MINIO_ROOT_PASSWORD=ci-not-a-secret \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+            quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
           for attempt in {1..30}; do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
               exit 0
