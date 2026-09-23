@@ -152,9 +152,7 @@ def validated_findings_subset(
     )
 
 
-def reanchor_whitespace_citations(
-    candidate: Findings, evidence: list[EvidencePiece]
-) -> Findings:
+def reanchor_whitespace_citations(candidate: Findings, evidence: list[EvidencePiece]) -> Findings:
     """Restore source whitespace when a model collapses it inside a verbatim quote.
 
     JSON-generating models commonly replace line breaks with spaces.  Only that
@@ -488,9 +486,7 @@ class EvidenceProcessor:
             # each extracted piece can contain many individual posts. Analyse
             # them one at a time so one malformed model response cannot erase
             # several chunks and a full report can cover more than two topics.
-            summary_batch_size = (
-                1 if submission.source_type == "profile_post_collection" else 4
-            )
+            summary_batch_size = 1 if submission.source_type == "profile_post_collection" else 4
             for offset in range(0, len(items), summary_batch_size):
                 batch = items[offset : offset + summary_batch_size]
                 try:

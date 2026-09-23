@@ -109,9 +109,7 @@ def build_blackglass_report(analysis: dict[str, Any]) -> dict[str, Any]:
         elif kind == "osp-profile-summary":
             evidence_label = "section" if len(evidence) == 1 else "sections"
             findings_label = "finding" if len(findings) == 1 else "findings"
-            contradictions_label = (
-                "contradiction" if len(contradictions) == 1 else "contradictions"
-            )
+            contradictions_label = "contradiction" if len(contradictions) == 1 else "contradictions"
             contradictions_verb = "was" if len(contradictions) == 1 else "were"
             body = (
                 f"Executive summary based on {len(evidence)} retained evidence {evidence_label} "

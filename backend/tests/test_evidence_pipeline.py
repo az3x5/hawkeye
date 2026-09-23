@@ -186,9 +186,7 @@ def test_reanchor_does_not_accept_changed_words() -> None:
         findings=[
             Finding(
                 statement="Unsupported time.",
-                citations=[
-                    Citation(evidence_id=piece.evidence_id, quote="meeting is at ten")
-                ],
+                citations=[Citation(evidence_id=piece.evidence_id, quote="meeting is at ten")],
             )
         ]
     )

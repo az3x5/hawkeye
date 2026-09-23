@@ -20,7 +20,8 @@ from app.connectors.postgres.media_tables import media_assets
 from app.connectors.postgres.tables import metadata
 
 event.listen(
-    metadata, "before_create",
+    metadata,
+    "before_create",
     DDL("CREATE SCHEMA IF NOT EXISTS evidence"),  # type: ignore[no-untyped-call]
 )
 

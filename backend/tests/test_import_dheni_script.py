@@ -75,9 +75,7 @@ def test_oauth_photo_source_caches_token_and_fetches_specific_photo() -> None:
 
     with patch.object(import_dheni, "_open_with_retry", side_effect=fake_open):
         photos = source.list_photos("A/B")
-        content, filename, content_type = source.download_photo(
-            "A/B", photos[0], 1024
-        )
+        content, filename, content_type = source.download_photo("A/B", photos[0], 1024)
 
     assert len([request for request in requests if request.get_method() == "POST"]) == 1
     assert requests[1].full_url.endswith("/v2/person/A%2FB/photos?format=metadata")
