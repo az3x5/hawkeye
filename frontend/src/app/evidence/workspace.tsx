@@ -203,7 +203,7 @@ export function EvidenceWorkspace({ canText, canMedia, initialAnalysisId = "", r
     setProfileAnalysisBusy(true); setError(""); setResult(null);
     try {
       const accepted = await readJson<{ analysis_id: string }>(
-        `/api/v1/integrations/blackglass/profiles/${encodeURIComponent(reportProfile)}/analyze`,
+        `/api/v1/integrations/blackglass/profiles/${encodeURIComponent(reportProfile)}/analyze?force=true`,
         { method: "POST" },
       );
       openReport(accepted.analysis_id);

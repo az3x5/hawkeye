@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -851,6 +851,7 @@ async def analyze_blackglass_profile(
     profile_id: str,
     request: Request,
     principal: Annotated[Principal, Depends(require(Scope.MEDIA_WRITE))],
+    force: Annotated[bool, Query()] = False,
 ) -> dict[str, Any]:
     """Create one cited report run from every imported post for a profile."""
     if not principal.has(Scope.LANGUAGE):
@@ -892,10 +893,11 @@ async def analyze_blackglass_profile(
             )
 
         label = str(rows[0]["title"]).split(" — ", 1)[0][:512]
+        generation_id = str(uuid4()) if force else None
         submission = TextSubmission(
             source_id=profile_id,
             source_type="profile_post_collection",
-            report_request_id=profile_id,
+            report_request_id=(f"{profile_id}:{generation_id}" if generation_id else profile_id),
             subject=ReportSubject(
                 subject_type="social_profile",
                 subject_id=profile_id,
@@ -906,6 +908,7 @@ async def analyze_blackglass_profile(
                 "profile_id": profile_id,
                 "record_count": len(rows),
                 "report_profile": "full-intelligence-v8",
+                **({"report_generation_id": generation_id} if generation_id else {}),
             },
             options=AnalysisOptions(language="mixed", summarize=True),
             text=corpus,

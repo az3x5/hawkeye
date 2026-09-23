@@ -484,7 +484,13 @@ class EvidenceProcessor:
             successful_batches = 0
             model_name = ""
             model_revision = ""
-            summary_batch_size = 4
+            # Profile collections are already bounded by the ingestion API and
+            # each extracted piece can contain many individual posts. Analyse
+            # them one at a time so one malformed model response cannot erase
+            # several chunks and a full report can cover more than two topics.
+            summary_batch_size = (
+                1 if submission.source_type == "profile_post_collection" else 4
+            )
             for offset in range(0, len(items), summary_batch_size):
                 batch = items[offset : offset + summary_batch_size]
                 try:
