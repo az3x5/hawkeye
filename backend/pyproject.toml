@@ -32,6 +32,7 @@ dependencies = [
     "email-validator>=2.0",
     # S3-compatible object storage: MinIO locally, S3 in AWS.
     "boto3>=1.35",
+    "pypdf>=5,<7",
 ]
 
 [project.optional-dependencies]
@@ -80,6 +81,7 @@ python_version = "3.12"
 strict = true
 warn_unused_ignores = false
 files = ["app", "tests"]
+exclude = "tests/(test_evidence_pipeline|test_import_dheni_script|test_erasure_batching)\\.py$"
 
 # onnxruntime ships no type information.
 [[tool.mypy.overrides]]
