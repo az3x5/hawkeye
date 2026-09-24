@@ -253,13 +253,15 @@ describe("proxy allowlist", () => {
     const { POST } = await import("../../app/api/v1/[...path]/route");
 
     const response = await POST(
-      new Request("http://localhost/api/v1/integrations/blackglass/profiles/profile-1/analyze", { method: "POST" }),
+      new Request("http://localhost/api/v1/integrations/blackglass/profiles/profile-1/analyze?force=true", {
+        method: "POST",
+      }),
       { params: Promise.resolve({ path: ["integrations", "blackglass", "profiles", "profile-1", "analyze"] }) },
     );
 
     expect(response.status).toBe(202);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      "http://api.test:8000/api/v1/integrations/blackglass/profiles/profile-1/analyze",
+      "http://api.test:8000/api/v1/integrations/blackglass/profiles/profile-1/analyze?force=true",
     );
   });
 

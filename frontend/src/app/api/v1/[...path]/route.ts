@@ -110,7 +110,7 @@ async function forward(request: Request, path: string, allowed: RegExp[]): Promi
       { status: 413 },
     );
   }
-  const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}${request.method === "GET" ? requestUrl.search : ""}`, {
+  const upstream = await fetch(`${apiBaseUrl()}/api/v1/${path}${requestUrl.search}`, {
     method: request.method,
     headers:
       request.method === "POST"
